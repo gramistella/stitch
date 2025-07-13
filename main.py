@@ -64,7 +64,7 @@ class StitchMainWindow(tk.Tk):
         super().__init__()
         self.tk.call("tk", "scaling", 1.0)
         self.title("Stitch")
-        self.geometry("900x600")
+        self.geometry("1100x600")
 
         #  Bind to the focus event to refresh the window.
         # self.bind("<FocusIn>", self.on_focus_in)
