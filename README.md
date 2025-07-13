@@ -1,5 +1,9 @@
 Stitch is a lightweight, cross-platform desktop utility built with Python and Tkinter. Its primary purpose is to help you select specific files and directories from a project, and then "stitch" them together into a single, consolidated text file.
 
+![Stitch Demo](assets/stitch-short-demo.gif)
+
+🎥 [Watch Full Demo (1:24) on YouTube](https://www.youtube.com/watch?v=kN6z7ULb5Es)
+
 ## 📚 Table of Contents
 
 - [Core Philosophy](#-core-philosophy)
