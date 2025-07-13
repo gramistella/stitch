@@ -59,11 +59,11 @@ def write_unicode_tree(tree_dict, text_widget, prefix="", is_last=True, root_nam
             write_unicode_tree(subtree, text_widget, prefix=child_prefix, is_last=False)
 
 
-class DirectoryExplorer(tk.Tk):
+class StitchMainWindow(tk.Tk):
     def __init__(self):
         super().__init__()
         self.tk.call("tk", "scaling", 1.0)
-        self.title("code_collator_py")
+        self.title("Stitch")
         self.geometry("900x600")
 
         #  Bind to the focus event to refresh the window.
@@ -594,7 +594,7 @@ class DirectoryExplorer(tk.Tk):
 
         dialog = tk.Toplevel(self)
         dialog.title("Select from Hierarchy Text")
-        dialog.geometry("500x400")
+        dialog.geometry("500x500")
 
         label = ttk.Label(dialog, text="Paste hierarchy text below (must include root folder name):")
         label.pack(padx=10, pady=(10, 5), anchor="w")
@@ -603,8 +603,8 @@ class DirectoryExplorer(tk.Tk):
         text_area.pack(padx=10, pady=5, expand=True, fill=tk.BOTH)
         text_area.focus()
 
-        apply_button = ttk.Button(dialog, text="Apply and Select", command=lambda: self._apply_and_close(text_area.get("1.0", tk.END), dialog))
-        apply_button.pack(pady=10)
+        apply_button = tk.Button(dialog, text="Apply and Select", command=lambda: self._apply_and_close(text_area.get("1.0", tk.END), dialog))
+        apply_button.pack(pady=10, padx=5)
 
     def _apply_and_close(self, text, dialog):
         """Helper to apply selections and then close the dialog."""
@@ -613,30 +613,46 @@ class DirectoryExplorer(tk.Tk):
 
     def apply_selection_from_text(self, text):
         """Parses the hierarchy text and updates the tree's check states."""
-        self.tree_checkstates.clear()
-
+        # 1. Parse the text to get a set of desired relative paths.
         try:
-            relative_paths = self._parse_hierarchy_text(text)
-            if not relative_paths:
-                self.refresh_tree()
-                self.generate_output()
-                return
+            # We no longer need to manually add the root ".", as we only care about files.
+            parsed_relative_paths = self._parse_hierarchy_text(text)
+
         except Exception as e:
             messagebox.showerror("Parsing Error", f"Could not parse the hierarchy text.\n\nError: {e}")
             return
 
-        # Mark the root directory as selected
-        self.tree_checkstates[self.selected_directory] = True
+        # 2. Clear all previous explicit check states.
+        self.tree_checkstates.clear()
 
-        # Apply new selections based on parsed paths
-        for rel_path in relative_paths:
-            # Normalize path separators for the current OS
-            normalized_rel_path = rel_path.replace("/", os.sep).replace("\\", os.sep)
-            full_path = os.path.join(self.selected_directory, normalized_rel_path)
-            self.tree_checkstates[full_path] = True
-
-        # Refresh the UI to reflect the new selections
+        # 3. Refresh the tree completely. It will be drawn with default (unchecked) states.
         self.refresh_tree()
+
+        # 4. Populate checkstates for FILES ONLY.
+        paths_to_check = 0
+        for item_id, full_path in self.tree_filepaths.items():
+            try:
+                item_rel_path = os.path.relpath(full_path, self.selected_directory)
+                normalized_item_rel_path = item_rel_path.replace(os.sep, "/")
+
+                if normalized_item_rel_path in parsed_relative_paths:
+                    # --- THE CORE FIX ---
+                    # Only set the state to True if the path is a file. Ignore directories.
+                    if os.path.isfile(full_path):
+                        self.tree_checkstates[full_path] = True
+                        paths_to_check += 1
+            except ValueError:
+                continue
+
+        # 5. Directly update the display for each item, ignoring inheritance.
+        for item_id, full_path in self.tree_filepaths.items():
+            is_checked = self.tree_checkstates.get(full_path, False)
+            prefix = "[x] " if is_checked else "[ ] "
+            base_name = self.node_names.get(item_id)
+            if base_name:
+                self.tree.item(item_id, text=prefix + base_name)
+
+        # 6. Generate the final output.
         self.generate_output()
 
     def _parse_hierarchy_text(self, text):
@@ -658,8 +674,7 @@ class DirectoryExplorer(tk.Tk):
                 continue
 
             name_start_index = match.start()
-            # CORRECTED: The level calculation is fixed here.
-            level = (name_start_index // 4) - 1
+            level = (name_start_index - 1) // 4 if name_start_index > 0 else 0
             name = line[name_start_index:].strip()
 
             path_parts = path_parts[:level]
@@ -668,11 +683,12 @@ class DirectoryExplorer(tk.Tk):
             current_rel_path = os.path.join(*path_parts)
             relative_paths.add(current_rel_path)
 
+
         return relative_paths
 
 
 def main():
-    app = DirectoryExplorer()
+    app = StitchMainWindow()
     app.mainloop()
 
 if __name__ == "__main__":
