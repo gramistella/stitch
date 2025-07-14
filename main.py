@@ -64,6 +64,14 @@ class StitchMainWindow(tk.Tk):
         super().__init__()
         self.tk.call("tk", "scaling", 1.0)
         self.title("Stitch")
+
+        try:
+            script_dir = os.path.dirname(__file__)
+            icon_path = os.path.join(script_dir, 'assets', 'icon.png')
+            self.iconphoto(True, tk.PhotoImage(file=icon_path))
+        except tk.TclError:
+            print("Warning: Could not find 'assets/icon.png'. Make sure the icon file exists.")
+
         self.geometry("1100x600")
 
         #  Bind to the focus event to refresh the window.

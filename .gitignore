@@ -2,3 +2,4 @@
 venv/
 
 *.iml
+.DS_Store
