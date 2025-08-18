@@ -288,7 +288,7 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
                         if end <= len && bytes[pos + 1..end].iter().all(|&b| b == b'#') {
                             state = State::Normal;
                             // advance iterator to end-1 (end is next start)
-                            while iter.peek().map_or(false, |(i, _)| *i < end) {
+                            while iter.peek().is_some_and(|(i, _)| *i < end) {
                                 iter.next();
                             }
                             prev_was_ws = false;
@@ -519,7 +519,7 @@ pub fn scan_dir_to_node(
                     let mut out = String::with_capacity(s.len() + 1);
                     out.push('.');
                     for b in s.bytes() {
-                        let lb = if (b'A'..=b'Z').contains(&b) {
+                        let lb = if b.is_ascii_uppercase() {
                             b + 32
                         } else {
                             b

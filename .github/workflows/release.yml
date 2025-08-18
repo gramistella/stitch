@@ -7,44 +7,22 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write  
+  contents: write   # needed to create/attach GitHub Releases
 
-env:
-  CARGO_TERM_COLOR: always
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  package:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # Linux GNU
-          - os: ubuntu-latest
-            label: linux-gnu
-            cmd: just tgz
-            glob: dist/*.tar.gz
-            target: ""
-            setup: linux-gnu
-          # Windows portable exe (zip)
-          - os: windows-latest
-            label: windows
-            cmd: just exe
-            glob: dist/*.zip
-            target: ""
-            setup: windows
-          # macOS .dmg
-          - os: macos-latest
-            label: macos
-            cmd: just dmg
-            glob: dist/*.dmg
-            target: ""
-            setup: macos
-
-    runs-on: ${{ matrix.os }}
-
+  # 1) Run tests first; release will wait for this to succeed
+  test:
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: actions/setup-rust@v1
+        with:
+          rust-version: stable
 
       - name: Cache cargo
         uses: actions/cache@v4
@@ -54,19 +32,58 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             target
-          key: ${{ runner.os }}-${{ matrix.target || 'default' }}-${{ hashFiles('**/Cargo.lock','**/Cargo.toml') }}
+          key: test-${{ runner.os }}-${{ hashFiles('**/Cargo.lock','**/Cargo.toml') }}
+
+      # Fast headless tests (skip UI deps)
+      - name: Test (no-default-features)
+        env:
+          RUST_BACKTRACE: 1
+        run: cargo test --all --release --no-default-features
+
+      # Make sure the UI build path still compiles
+      - name: Compile check (ui feature)
+        run: cargo build --release --features ui
+
+  # 2) Only if tests succeed, build & publish artifacts per-OS
+  release:
+    needs: test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            label: linux
+            cmd: just tgz
+            glob: dist/*.tar.gz
+          - os: windows-latest
+            label: windows
+            cmd: just exe
+            glob: dist/*.zip
+          - os: macos-latest
+            label: macos
+            cmd: just dmg
+            glob: dist/*.dmg
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-rust@v1
+        with:
+          rust-version: stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: release-${{ runner.os }}-${{ hashFiles('**/Cargo.lock','**/Cargo.toml') }}
 
       - name: Install just
         run: cargo install just --locked || true
-        shell: bash
-
-      # Extra setup per-platform when needed
-      - name: Setup (linux-musl)
-        if: ${{ matrix.setup == 'linux-musl' }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y musl-tools
-          rustup target add x86_64-unknown-linux-musl || true
         shell: bash
 
       # Build & package via the per-OS just recipe
@@ -74,14 +91,13 @@ jobs:
         run: ${{ matrix.cmd }}
         shell: bash
 
-      - name: Upload artifact (${{ matrix.label }})
+      - name: Upload artifact (CI run)
         uses: actions/upload-artifact@v4
         with:
           name: stitch-${{ matrix.label }}
           path: ${{ matrix.glob }}
 
-      - name: Attach to GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Attach files to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: ${{ matrix.glob }}
