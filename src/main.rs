@@ -49,7 +49,7 @@ struct AppState {
 // src/main.rs
 fn main() -> anyhow::Result<()> {
     let app = AppWindow::new()?;
-    
+
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
     // Initialize default UI values (match the Python defaults where reasonable)
     app.set_ext_filter("".into());
