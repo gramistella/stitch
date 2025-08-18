@@ -7,16 +7,22 @@ license = "MIT"
 readme = "README.md"
 repository = "https://github.com/gramistella/stitch"
 
+[features]
+default = ["ui"]
+ui = ["dep:slint", "dep:rfd", "dep:arboard"] 
+
 [dependencies]
-slint = "1"
-rfd = "0.14"
+# Make the UI deps optional so they’re not pulled in for headless/test builds
+slint   = { version = "1", optional = true }
+rfd     = { version = "0.14", optional = true }
+arboard = { version = "3", optional = true }
+
 regex = "1"
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 pathdiff = "0.2"
 serde_json = "1"
 dunce = "1"
-arboard = "3"
 
 [build-dependencies]
 slint-build = "1"
@@ -27,3 +33,16 @@ identifier = "com.gramistella.stitch"
 icon = ["ui/assets/icon.icns"]  # macOS uses .icns
 category = "Developer Tool"
 short_description = "Select files from a project and stitch them into one text."
+
+[dev-dependencies]
+tempfile = "3"
+pretty_assertions = "1"
+proptest = "1"
+
+[[bin]]
+name = "stitch"
+path = "src/main.rs"
+test = false   
+doctest = false
+bench = false
+

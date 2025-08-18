@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint:
+    name: Lint (fmt + clippy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ hashFiles('**/Cargo.lock','**/Cargo.toml') }}-lint
+
+      - name: rustfmt
+        run: cargo fmt --all -- --check
+
+      # Clippy core (no UI deps)
+      - name: clippy (no-default-features)
+        run: cargo clippy --all-targets --no-default-features -- -D warnings
+
+      # Clippy UI path compiles too
+      - name: clippy (ui feature)
+        run: cargo clippy --all-targets --features ui -- -D warnings
+
+  test:
+    name: Test & Build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ hashFiles('**/Cargo.lock','**/Cargo.toml') }}-test
+
+      # Headless build/tests (skips Slint build.rs path)
+      - name: Build (no UI)
+        run: cargo build --no-default-features --verbose
+
+      - name: Test (no UI)
+        env:
+          RUST_BACKTRACE: 1
+        run: cargo test --no-default-features --all --verbose
+
+      # Ensure UI compilation path keeps working on all OSes
+      - name: Build (ui feature)
+        run: cargo build --features ui --verbose
