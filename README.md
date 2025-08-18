@@ -153,3 +153,9 @@ Issues and PRs welcome—whether for defaults (exclusions), performance tweaks, 
 
 MIT © 2025 Giovanni Ramistella
 
+It also bundles third-party assets:
+
+- [JetBrains Mono](https://www.jetbrains.com/lp/mono/) font, licensed under the  
+  [SIL Open Font License 1.1](./LICENSES/LICENSE-JetBrainsMono.txt).
+
+All third-party licenses are collected in the [LICENSES/](./LICENSES) folder.

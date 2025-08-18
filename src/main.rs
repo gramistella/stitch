@@ -53,7 +53,7 @@ fn main() -> anyhow::Result<()> {
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
     // Initialize default UI values (match the Python defaults where reasonable)
     app.set_ext_filter("".into());
-    app.set_exclude_dirs(".git, node_modules, target, _target, .elan, .lake, .idea, .vscode, _app, .svelte-kit, .sqlx, venv, .venv, __pycache__".into());
+    app.set_exclude_dirs(".git, node_modules, target, _target, .elan, .lake, .idea, .vscode, _app, .svelte-kit, .sqlx, venv, .venv, __pycache__, LICENSES".into());
     app.set_exclude_files("LICENSE, Cargo.lock, package-lock.json, yarn.lock, .DS_Store, .dockerignore, .gitignore, .npmignore, .pre-commit-config.yaml, .prettierignore, .prettierrc, eslint.config.js, .env, Thumbs.db".into());
     app.set_remove_prefix("".into());
     app.set_remove_regex("".into());
