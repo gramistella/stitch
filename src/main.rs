@@ -53,6 +53,7 @@ struct AppState {
     fs_dirty: bool,
     watcher: Option<notify::RecommendedWatcher>,
     fs_event_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
+    fs_pump_timer: slint::Timer,
 }
 
 #[cfg(feature = "ui")]
@@ -262,13 +263,15 @@ fn on_select_folder(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
             s.selected_directory = Some(dir.clone());
             s.explicit_states.clear();
             s.last_mod_times.clear();
-            s.fs_dirty = true; // force initial rebuild
+            s.fs_dirty = true; // initial build trigger (manual rebuild happens next)
         }
-        // (Re)start watcher for the chosen root
         let _ = start_fs_watcher(app, state);
 
         rebuild_tree_and_ui(app, state);
         update_last_refresh(app);
+
+        // Prevent the pump (250ms) from immediately rescanning the tree we just rebuilt.
+        state.borrow_mut().fs_dirty = false;
     }
 }
 
@@ -743,11 +746,12 @@ fn start_fs_watcher(app: &AppWindow, state: &Rc<RefCell<AppState>>) -> notify::R
     use notify::{RecommendedWatcher, RecursiveMode, Watcher};
     use std::sync::mpsc;
 
-    // Drop any previous watcher and receiver.
     {
         let mut s = state.borrow_mut();
         s.watcher = None;
         s.fs_event_rx = None;
+        // (optional) stop any prior pump before restarting
+        // s.fs_pump_timer.stop(); // call if available in your Slint version
     }
 
     let root = {
@@ -766,19 +770,14 @@ fn start_fs_watcher(app: &AppWindow, state: &Rc<RefCell<AppState>>) -> notify::R
         let mut s = state.borrow_mut();
         s.watcher = Some(watcher);
         s.fs_event_rx = Some(rx);
-    }
 
-    // Lightweight UI timer: drain events on the UI thread and refresh if anything arrived.
-    {
         let app_weak = app.as_weak();
         let state_rc = Rc::clone(state);
-        let pump = slint::Timer::default();
-        pump.start(
+        s.fs_pump_timer.start(
             slint::TimerMode::Repeated,
             std::time::Duration::from_millis(250),
             move || {
                 if let Some(app) = app_weak.upgrade() {
-                    // drain on UI thread without holding a mutable borrow
                     let any = {
                         let s = state_rc.borrow();
                         s.fs_event_rx
@@ -793,7 +792,6 @@ fn start_fs_watcher(app: &AppWindow, state: &Rc<RefCell<AppState>>) -> notify::R
                 }
             },
         );
-        // If you prefer, store `pump` in AppState to keep it alive.
     }
 
     Ok(())
