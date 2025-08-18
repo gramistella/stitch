@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f4077b8474fdc8578afa5da695a5317da971c013d87e90fe2a64d3042a437268 # shrinks to files = [FileSpec { dirs: [], fname: "a.a", last_ext: ".a" }, FileSpec { dirs: [], fname: "A.b", last_ext: ".b" }, FileSpec { dirs: [], fname: "A.h", last_ext: ".h" }, FileSpec { dirs: [], fname: "0.a.i", last_ext: ".i" }, FileSpec { dirs: [], fname: "0.j", last_ext: ".j" }, FileSpec { dirs: [], fname: "a.k", last_ext: ".k" }, FileSpec { dirs: [], fname: "0.l", last_ext: ".l" }, FileSpec { dirs: [], fname: "A.a.c", last_ext: ".c" }, FileSpec { dirs: [], fname: "-.m", last_ext: ".m" }, FileSpec { dirs: ["e"], fname: "_M_Gxj.mj.bo", last_ext: ".bo" }, FileSpec { dirs: [], fname: "_-RGo_e.lx", last_ext: ".lx" }, FileSpec { dirs: ["E"], fname: "X.r.gqy", last_ext: ".gqy" }]

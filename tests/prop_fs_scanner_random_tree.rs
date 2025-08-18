@@ -238,8 +238,23 @@ proptest! {
 
     #[test]
     fn scanner_respects_filters_and_order(files in prop::collection::vec(file_spec(), 1..20)) {
+        use std::collections::BTreeSet;
+
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
+
+        // --- helpers (scoped to this test) ---
+        fn fs_case_insensitive(root: &std::path::Path) -> bool {
+            let probe = root.join("CiProbe");
+            let _ = std::fs::create_dir(&probe);
+            let insensitive_alias = root.join("ciprobe");
+            let is_ci = insensitive_alias.exists();
+            let _ = std::fs::remove_dir_all(&probe);
+            is_ci
+        }
+        fn lower_set(set: &BTreeSet<String>) -> BTreeSet<String> {
+            set.iter().map(|s| s.to_lowercase()).collect()
+        }
 
         // Materialize the random tree.
         make_on_disk(root, &files);
@@ -286,26 +301,53 @@ proptest! {
             }
         }
 
-        // ==== Assertions ====
+        // ==== Assertions (case-aware) ====
+        let case_insensitive = fs_case_insensitive(root);
 
-        // 1) Files: the model must exactly match the expected set.
-        prop_assert_eq!(actual_files, expected_files.clone());
-
-        // 2) No excluded directory basename appears anywhere in the model.
-        for banned in &exclude_dirs {
-            prop_assert!(!actual_dir_basenames.contains(banned),
-                "excluded dir name '{}' must not be present in the model", banned);
+        // 1) Files: the model must exactly match the expected set (normalized if FS is CI).
+        if case_insensitive {
+            prop_assert_eq!(lower_set(&actual_files), lower_set(&expected_files));
+        } else {
+            prop_assert_eq!(actual_files, expected_files.clone());
         }
 
-        // 3) Per-directory ordering (files then dirs; each block sorted).
+        // 2) Per-directory ordering (files then dirs; each block sorted).
         prop_assert!(order_ok_everywhere(&tree), "directory children ordering violated somewhere");
 
-        // 4) In include-mode, every non-root directory that appears must have at least one included file descendant.
+        // 3) No excluded directory basename appears anywhere in the model.
+        if case_insensitive {
+            for banned in &exclude_dirs {
+                let banned_l = banned.to_lowercase();
+                prop_assert!(
+                    !actual_dir_basenames.iter().any(|n| n.to_lowercase() == banned_l),
+                    "excluded dir name '{}' (case-insensitive) must not be present", banned
+                );
+            }
+        } else {
+            for banned in &exclude_dirs {
+                prop_assert!(
+                    !actual_dir_basenames.contains(banned),
+                    "excluded dir name '{}' must not be present", banned
+                );
+            }
+        }
+
+        // 4) In include-mode, every non-root directory that appears must have
+        //    at least one included file descendant (normalized if FS is CI).
+        let expected_files_norm =
+            if case_insensitive { lower_set(&expected_files) } else { expected_files.clone() };
+
+        let actual_dirs_norm: BTreeSet<String> = if case_insensitive {
+            actual_dirs.iter().map(|d| d.to_lowercase()).collect()
+        } else {
+            actual_dirs.clone()
+        };
+
         if include_mode {
-            for d in &actual_dirs {
+            for d in &actual_dirs_norm {
                 // Does this directory prefix at least one expected file?
                 let prefix = format!("{}/", d);
-                let has_desc = expected_files.iter().any(|f| f == d || f.starts_with(&prefix));
+                let has_desc = expected_files_norm.iter().any(|f| f == d || f.starts_with(&prefix));
                 prop_assert!(has_desc,
                     "include-mode: directory '{}' should be hidden if it has no included file descendant",
                     d);

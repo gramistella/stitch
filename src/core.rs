@@ -143,6 +143,18 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
 
     let mut out = String::with_capacity(contents.len());
 
+    // ===== NEW: carry string/comment state across lines =====
+    #[derive(Copy, Clone, Debug, PartialEq, Eq)]
+    enum State {
+        Normal,
+        Dq { escaped: bool },
+        Sq { escaped: bool },
+        Raw { hashes: usize },
+        TripleDq,
+        TripleSq,
+    }
+    let mut state = State::Normal;
+
     'line: for line in contents.lines() {
         let bytes = line.as_bytes();
         let len = bytes.len();
@@ -154,8 +166,8 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
             .map(|(i, _)| i)
             .unwrap_or(len);
 
-        // Full-line comments: prefix must start at first_non_ws.
-        if first_non_ws < len {
+        // Full-line comments: only when we're NOT inside a multi-line construct.
+        if matches!(state, State::Normal) && first_non_ws < len {
             let bucket = &by_first[bytes[first_non_ws] as usize];
             for p in bucket {
                 if bytes[first_non_ws..].starts_with(p) {
@@ -164,17 +176,6 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
             }
         }
 
-        #[derive(Copy, Clone, Debug, PartialEq, Eq)]
-        enum State {
-            Normal,
-            Dq { escaped: bool },
-            Sq { escaped: bool },
-            Raw { hashes: usize },
-            TripleDq,
-            TripleSq,
-        }
-
-        let mut state = State::Normal;
         let mut cut_at: Option<usize> = None;
 
         // Track whether previous char (in Normal state) was whitespace.
@@ -191,10 +192,10 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
                     // Triple-quote openers first.
                     if slice.starts_with(b"\"\"\"") {
                         state = State::TripleDq;
-                        // fast-skip 3 bytes
+                        // fast-skip 2 more bytes (we've already consumed one char this loop)
                         for _ in 0..2 {
                             iter.next();
-                        } // we've already consumed one; skip 2 more
+                        }
                         prev_was_ws = false;
                         continue;
                     } else if slice.starts_with(b"'''") {
@@ -237,7 +238,7 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
                         continue;
                     }
 
-                    // Inline comment detection:
+                    // Inline comment detection (only in Normal):
                     //  - only after the first non-ws
                     //  - require immediate whitespace before prefix
                     if pos >= first_non_ws && prev_was_ws {
@@ -519,11 +520,7 @@ pub fn scan_dir_to_node(
                     let mut out = String::with_capacity(s.len() + 1);
                     out.push('.');
                     for b in s.bytes() {
-                        let lb = if b.is_ascii_uppercase() {
-                            b + 32
-                        } else {
-                            b
-                        };
+                        let lb = if b.is_ascii_uppercase() { b + 32 } else { b };
                         out.push(lb as char);
                     }
                     out
@@ -693,4 +690,12 @@ pub fn collect_selected_paths(
     } else if my_effective {
         files_out.push(node.path.clone());
     }
+}
+
+pub fn drain_channel_nonblocking<T>(rx: &std::sync::mpsc::Receiver<T>) -> bool {
+    let mut any = false;
+    while rx.try_recv().is_ok() {
+        any = true;
+    }
+    any
 }

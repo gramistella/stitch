@@ -27,9 +27,9 @@ slint::include_modules!();
 #[cfg(feature = "ui")]
 use stitch::core::{
     Node, clean_remove_regex, collapse_consecutive_blank_lines, collect_selected_paths,
-    compile_remove_regex_opt, gather_paths_set, is_ancestor_of, parse_extension_filters,
-    parse_hierarchy_text, path_to_unix, render_unicode_tree_from_paths, scan_dir_to_node,
-    split_prefix_list, strip_lines_and_inline_comments,
+    compile_remove_regex_opt, drain_channel_nonblocking, gather_paths_set, is_ancestor_of,
+    parse_extension_filters, parse_hierarchy_text, path_to_unix, render_unicode_tree_from_paths,
+    scan_dir_to_node, split_prefix_list, strip_lines_and_inline_comments,
 };
 
 #[cfg(feature = "ui")]
@@ -50,6 +50,9 @@ struct AppState {
     exclude_files: HashSet<String>,
     copy_toast_timer: slint::Timer,
     select_dialog: Option<SelectFromTextDialog>,
+    fs_dirty: bool,
+    watcher: Option<notify::RecommendedWatcher>,
+    fs_event_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
 }
 
 #[cfg(feature = "ui")]
@@ -259,7 +262,11 @@ fn on_select_folder(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
             s.selected_directory = Some(dir.clone());
             s.explicit_states.clear();
             s.last_mod_times.clear();
+            s.fs_dirty = true; // force initial rebuild
         }
+        // (Re)start watcher for the chosen root
+        let _ = start_fs_watcher(app, state);
+
         rebuild_tree_and_ui(app, state);
         update_last_refresh(app);
     }
@@ -683,12 +690,17 @@ fn split_csv_set(s: &slint::SharedString) -> HashSet<String> {
 
 #[cfg(feature = "ui")]
 fn on_check_updates(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
-    let (selected_dir, root_opt) = {
+    // Fast bail-out when nothing changed.
+    let should_scan = {
         let s = state.borrow();
-        (s.selected_directory.clone(), s.root_node.clone())
+        s.selected_directory.is_some() && s.root_node.is_some() && s.fs_dirty
     };
-    if selected_dir.is_none() || root_opt.is_none() {
+    if !should_scan {
         return;
+    }
+    // clear dirty before work (events arriving during scan will re-mark it)
+    {
+        state.borrow_mut().fs_dirty = false;
     }
 
     let (changed, new_root, new_snapshot) = {
@@ -701,7 +713,6 @@ fn on_check_updates(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
 
         let fresh_root = scan_dir_to_node(&dir, &include, &exclude, &ex_dirs, &ex_files);
         let fresh_snapshot = gather_paths_set(&fresh_root);
-
         let changed = match &s.path_snapshot {
             None => true,
             Some(old) => *old != fresh_snapshot,
@@ -719,34 +730,71 @@ fn on_check_updates(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         return;
     }
 
+    // If the tree didn't structurally change but files were modified,
+    // regenerate output only when not in "dirs only".
     let want_dirs_only = app.get_dirs_only();
     if !want_dirs_only {
-        let selected_files = {
-            let s = state.borrow();
-            let mut files = Vec::new();
-            collect_selected_paths(
-                s.root_node.as_ref().unwrap(),
-                &s.explicit_states,
-                None,
-                &mut files,
-                &mut Vec::new(),
-            );
-            files
-        };
-
-        let mut update_needed = false;
-        {
-            let s = state.borrow();
-            for fp in &selected_files {
-                let current = fs::metadata(fp).ok().and_then(|m| m.modified().ok());
-                if current != s.last_mod_times.get(fp).cloned().unwrap_or(None) {
-                    update_needed = true;
-                    break;
-                }
-            }
-        }
-        if update_needed {
-            on_generate_output(app, state);
-        }
+        on_generate_output(app, state);
     }
+}
+
+#[cfg(feature = "ui")]
+fn start_fs_watcher(app: &AppWindow, state: &Rc<RefCell<AppState>>) -> notify::Result<()> {
+    use notify::{RecommendedWatcher, RecursiveMode, Watcher};
+    use std::sync::mpsc;
+
+    // Drop any previous watcher and receiver.
+    {
+        let mut s = state.borrow_mut();
+        s.watcher = None;
+        s.fs_event_rx = None;
+    }
+
+    let root = {
+        let s = state.borrow();
+        match &s.selected_directory {
+            Some(p) => p.clone(),
+            None => return Ok(()),
+        }
+    };
+
+    let (tx, rx) = mpsc::channel();
+    let mut watcher: RecommendedWatcher = notify::recommended_watcher(tx)?;
+    watcher.watch(&root, RecursiveMode::Recursive)?;
+
+    {
+        let mut s = state.borrow_mut();
+        s.watcher = Some(watcher);
+        s.fs_event_rx = Some(rx);
+    }
+
+    // Lightweight UI timer: drain events on the UI thread and refresh if anything arrived.
+    {
+        let app_weak = app.as_weak();
+        let state_rc = Rc::clone(state);
+        let pump = slint::Timer::default();
+        pump.start(
+            slint::TimerMode::Repeated,
+            std::time::Duration::from_millis(250),
+            move || {
+                if let Some(app) = app_weak.upgrade() {
+                    // drain on UI thread without holding a mutable borrow
+                    let any = {
+                        let s = state_rc.borrow();
+                        s.fs_event_rx
+                            .as_ref()
+                            .map(drain_channel_nonblocking)
+                            .unwrap_or(false)
+                    };
+                    if any {
+                        state_rc.borrow_mut().fs_dirty = true;
+                        on_check_updates(&app, &state_rc);
+                    }
+                }
+            },
+        );
+        // If you prefer, store `pump` in AppState to keep it alive.
+    }
+
+    Ok(())
 }

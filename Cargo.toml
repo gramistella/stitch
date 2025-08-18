@@ -23,6 +23,7 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 pathdiff = "0.2"
 serde_json = "1"
 dunce = "1"
+notify = "6"
 
 [build-dependencies]
 slint-build = "1"
