@@ -33,12 +33,18 @@ pub fn parse_hierarchy_text(text: &str) -> Option<HashSet<String>> {
             continue;
         }
 
+        // Find name start once, tracking both char index and byte index.
         let mut name_char_idx: Option<usize> = None;
+        let mut name_byte_idx: usize = 0;
+        let mut byte_pos: usize = 0;
+
         for (i, ch) in line.chars().enumerate() {
             if ch != '│' && ch != '└' && ch != '├' && ch != '─' && !ch.is_whitespace() {
                 name_char_idx = Some(i);
+                name_byte_idx = byte_pos;
                 break;
             }
+            byte_pos += ch.len_utf8();
         }
         let name_char_idx = match name_char_idx {
             Some(i) => i,
@@ -51,12 +57,7 @@ pub fn parse_hierarchy_text(text: &str) -> Option<HashSet<String>> {
             0
         };
 
-        let byte_start = line
-            .char_indices()
-            .nth(name_char_idx)
-            .map(|(b, _)| b)
-            .unwrap_or(0);
-        let name = line[byte_start..].trim();
+        let name = line[name_byte_idx..].trim();
         if name.is_empty() {
             continue;
         }
@@ -89,13 +90,12 @@ pub fn render_unicode_tree_from_paths(paths: &[String], root_name: Option<&str>)
         if parts.is_empty() {
             return;
         }
-        let head = parts[0].to_string();
-        let entry = root.children.entry(head).or_default();
+        let entry = root.children.entry(parts[0].to_string()).or_default();
         if parts.len() > 1 {
             insert_path(entry, &parts[1..]);
         }
     }
-    fn render(node: &T, prefix: &str, out: &mut String) {
+    fn render(node: &T, prefix: &mut String, out: &mut String) {
         let len = node.children.len();
         for (idx, (name, child)) in node.children.iter().enumerate() {
             let last = idx + 1 == len;
@@ -105,8 +105,10 @@ pub fn render_unicode_tree_from_paths(paths: &[String], root_name: Option<&str>)
             out.push('\n');
 
             if !child.children.is_empty() {
-                let child_prefix = format!("{}{}", prefix, if last { "    " } else { "│   " });
-                render(child, &child_prefix, out);
+                let saved = prefix.len();
+                prefix.push_str(if last { "    " } else { "│   " });
+                render(child, prefix, out);
+                prefix.truncate(saved);
             }
         }
     }
@@ -122,7 +124,8 @@ pub fn render_unicode_tree_from_paths(paths: &[String], root_name: Option<&str>)
         out.push_str(name);
         out.push('\n');
     }
-    render(&root, "", &mut out);
+    let mut prefix = String::new();
+    render(&root, &mut prefix, &mut out);
     out
 }
 
@@ -131,24 +134,36 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
         return contents.to_string();
     }
 
+    // Precompute non-empty prefixes as byte slices and group by first byte for O(1) dispatch.
+    let mut by_first: [Vec<&[u8]>; 256] = std::array::from_fn(|_| Vec::new());
+    for p in prefixes.iter().filter(|p| !p.is_empty()) {
+        let b = p.as_bytes();
+        by_first[*b.first().unwrap_or(&0) as usize].push(b);
+    }
+
     let mut out = String::with_capacity(contents.len());
 
     'line: for line in contents.lines() {
-        // 1) Full-line comments: remove if the first non-ws starts with any prefix.
+        let bytes = line.as_bytes();
+        let len = bytes.len();
+
+        // First non-whitespace (unicode-aware) index, as byte offset.
         let first_non_ws = line
             .char_indices()
             .find(|&(_, ch)| !ch.is_whitespace())
             .map(|(i, _)| i)
-            .unwrap_or_else(|| line.len());
+            .unwrap_or(len);
 
-        if prefixes
-            .iter()
-            .any(|p| !p.is_empty() && line[first_non_ws..].starts_with(p))
-        {
-            continue 'line;
+        // Full-line comments: prefix must start at first_non_ws.
+        if first_non_ws < len {
+            let bucket = &by_first[bytes[first_non_ws] as usize];
+            for p in bucket {
+                if bytes[first_non_ws..].starts_with(p) {
+                    continue 'line; // drop whole line
+                }
+            }
         }
 
-        // 2) Inline comments: scan while being quote-aware.
         #[derive(Copy, Clone, Debug, PartialEq, Eq)]
         enum State {
             Normal,
@@ -162,84 +177,82 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
         let mut state = State::Normal;
         let mut cut_at: Option<usize> = None;
 
-        let mut pos = 0usize;
-        let len = line.len();
-        let bytes = line.as_bytes();
+        // Track whether previous char (in Normal state) was whitespace.
+        let mut prev_was_ws = false;
 
-        // Track the previous *character* for the whitespace check.
-        let mut prev_char: Option<char> = None;
-
-        while pos < len {
-            // helpers
-            let slice = &line[pos..];
-            let ch = slice.chars().next().unwrap();
-            let ch_w = ch.len_utf8();
+        // Single pass over char indices; use next byte index to avoid len_utf8.
+        let mut iter = line.char_indices().peekable();
+        while let Some((pos, ch)) = iter.next() {
+            let next_pos = iter.peek().map(|(i, _)| *i).unwrap_or(len);
+            let slice = &bytes[pos..];
 
             match state {
                 State::Normal => {
-                    // Detect triple quotes first (language-agnostic Python-like).
-                    if slice.starts_with("\"\"\"") {
+                    // Triple-quote openers first.
+                    if slice.starts_with(b"\"\"\"") {
                         state = State::TripleDq;
-                        pos += 3;
-                        prev_char = Some('"');
+                        // fast-skip 3 bytes
+                        for _ in 0..2 { iter.next(); } // we've already consumed one; skip 2 more
+                        prev_was_ws = false;
                         continue;
-                    } else if slice.starts_with("'''") {
+                    } else if slice.starts_with(b"'''") {
                         state = State::TripleSq;
-                        pos += 3;
-                        prev_char = Some('\'');
+                        for _ in 0..2 { iter.next(); }
+                        prev_was_ws = false;
                         continue;
                     }
 
-                    // Detect Rust-style raw string start: r###" ... "###
+                    // Raw string opener: r####"
                     if ch == 'r' {
-                        let mut j = pos + ch_w; // after 'r'
+                        // Count '#' after 'r'
+                        let mut j = next_pos; // byte index after 'r'
                         let mut hashes = 0usize;
                         while j < len && bytes[j] == b'#' {
                             hashes += 1;
+                            // advance iterator to align with 'j'
+                            let _ = iter.next_if(|(idx, _)| *idx == j);
                             j += 1;
                         }
                         if j < len && bytes[j] == b'"' {
+                            // consume the '"' (advance iterator to j)
+                            let _ = iter.next_if(|(idx, _)| *idx == j);
                             state = State::Raw { hashes };
-                            pos = j + 1; // skip opening quote too
-                            prev_char = Some('"');
+                            prev_was_ws = false;
                             continue;
                         }
                     }
 
-                    // Regular quote starts
+                    // Normal string openers
                     if ch == '"' {
                         state = State::Dq { escaped: false };
-                        pos += ch_w;
-                        prev_char = Some(ch);
+                        prev_was_ws = false;
                         continue;
                     } else if ch == '\'' {
                         state = State::Sq { escaped: false };
-                        pos += ch_w;
-                        prev_char = Some(ch);
+                        prev_was_ws = false;
                         continue;
                     }
 
-                    // Only consider prefixes when not inside any quotes and past leading ws
-                    if pos >= first_non_ws {
-                        for p in prefixes {
-                            if p.is_empty() {
-                                continue;
-                            }
-                            if slice.starts_with(p) {
-                                // Require whitespace immediately before the prefix
-                                if prev_char.map(|c| c.is_whitespace()).unwrap_or(false) {
+                    // Inline comment detection:
+                    //  - only after the first non-ws
+                    //  - require immediate whitespace before prefix
+                    if pos >= first_non_ws && prev_was_ws {
+                        let b0 = bytes[pos];
+                        let bucket = &by_first[b0 as usize];
+                        if !bucket.is_empty() {
+                            for p in bucket {
+                                if slice.starts_with(p) {
                                     cut_at = Some(pos);
                                     break;
                                 }
                             }
-                        }
-                        if cut_at.is_some() {
-                            break;
+                            if cut_at.is_some() {
+                                break;
+                            }
                         }
                     }
 
-                    pos += ch_w;
-                    prev_char = Some(ch);
+                    prev_was_ws = ch.is_whitespace();
                 }
 
                 State::Dq { mut escaped } => {
@@ -247,12 +260,10 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
                         state = State::Normal;
                     }
                     escaped = ch == '\\' && !escaped;
-                    // update state with new escape flag
                     if let State::Dq { .. } = state {
                         state = State::Dq { escaped };
                     }
-                    pos += ch_w;
-                    prev_char = Some(ch);
+                    prev_was_ws = false;
                 }
 
                 State::Sq { mut escaped } => {
@@ -263,59 +274,64 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
                     if let State::Sq { .. } = state {
                         state = State::Sq { escaped };
                     }
-                    pos += ch_w;
-                    prev_char = Some(ch);
+                    prev_was_ws = false;
                 }
 
                 State::Raw { hashes } => {
-                    // End when we see '"' followed by exactly `hashes` '#' chars
+                    // Close when we see '"' followed by exactly `hashes` '#'
                     if bytes[pos] == b'"' {
-                        let j = pos + 1;
-                        let end = j + hashes;
-                        if end <= len && bytes[j..end].iter().all(|&b| b == b'#') {
+                        let end = pos + 1 + hashes;
+                        if end <= len && bytes[pos + 1..end].iter().all(|&b| b == b'#') {
                             state = State::Normal;
-                            pos = end;
-                            prev_char = Some('"');
+                            // advance iterator to end-1 (end is next start)
+                            while iter.peek().map_or(false, |(i, _)| *i < end) {
+                                iter.next();
+                            }
+                            prev_was_ws = false;
                             continue;
                         }
                     }
-                    pos += ch_w;
-                    prev_char = Some(ch);
+                    prev_was_ws = false;
                 }
 
                 State::TripleDq => {
-                    if slice.starts_with("\"\"\"") {
+                    if slice.starts_with(b"\"\"\"") {
                         state = State::Normal;
-                        pos += 3;
-                        prev_char = Some('"');
+                        for _ in 0..2 { iter.next(); }
+                        prev_was_ws = false;
                         continue;
                     }
-                    pos += ch_w;
-                    prev_char = Some(ch);
+                    prev_was_ws = false;
                 }
 
                 State::TripleSq => {
-                    if slice.starts_with("'''") {
+                    if slice.starts_with(b"'''") {
                         state = State::Normal;
-                        pos += 3;
-                        prev_char = Some('\'');
+                        for _ in 0..2 { iter.next(); }
+                        prev_was_ws = false;
                         continue;
                     }
-                    pos += ch_w;
-                    prev_char = Some(ch);
+                    prev_was_ws = false;
                 }
             }
         }
 
-        let kept = if let Some(cut) = cut_at {
-            let left = &line[..cut];
-            left.trim_end_matches([' ', '\t']).to_string()
+        // Emit the line (possibly trimmed up to cut_at), trimming only ASCII space/tab before the prefix.
+        if let Some(mut end) = cut_at {
+            while end > 0 {
+                let b = bytes[end - 1];
+                if b == b' ' || b == b'\t' {
+                    end -= 1;
+                } else {
+                    break;
+                }
+            }
+            out.push_str(&line[..end]);
+            out.push('\n');
         } else {
-            line.to_string()
-        };
-
-        out.push_str(&kept);
-        out.push('\n');
+            out.push_str(line);
+            out.push('\n');
+        }
     }
 
     out
@@ -385,33 +401,37 @@ pub fn parse_extension_filters(
 }
 
 pub fn collapse_consecutive_blank_lines(s: &str) -> String {
-    let mut out_lines = Vec::new();
+    let mut out = String::with_capacity(s.len());
     let mut prev_blank = false;
-
     for line in s.lines() {
         let is_blank = line.trim().is_empty();
         if is_blank && prev_blank {
             continue;
         }
-        out_lines.push(line);
+        out.push_str(line);
+        out.push('\n');
         prev_blank = is_blank;
     }
-
-    let mut normalized = out_lines.join("\n");
-    if s.ends_with('\n') {
-        normalized.push('\n');
+    if !s.ends_with('\n') && out.ends_with('\n') {
+        out.pop(); // remove trailing newline if input had none
     }
-    normalized
+    out
 }
+
 
 /* =========================== Filesystem & paths ============================ */
 
 pub fn path_to_unix(p: &Path) -> String {
-    p.iter()
-        .map(|c| c.to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
+    let mut s = String::new();
+    for (i, comp) in p.iter().enumerate() {
+        if i > 0 {
+            s.push('/');
+        }
+        s.push_str(&comp.to_string_lossy());
+    }
+    s
 }
+
 
 pub fn is_ancestor_of(ancestor: &Path, p: &Path) -> bool {
     let anc = normalize_path(ancestor);
@@ -484,11 +504,39 @@ pub fn scan_dir_to_node(
     exclude_dirs: &HashSet<String>,
     exclude_files: &HashSet<String>,
 ) -> Node {
+    #[inline]
+    fn dot_lower_last_ext(p: &Path) -> String {
+        match p.extension() {
+            Some(os) => {
+                if let Some(s) = os.to_str() {
+                    // ASCII-fast path, avoids Unicode-lowering allocs for common cases.
+                    let mut out = String::with_capacity(s.len() + 1);
+                    out.push('.');
+                    for b in s.bytes() {
+                        let lb = if (b'A'..=b'Z').contains(&b) { b + 32 } else { b };
+                        out.push(lb as char);
+                    }
+                    out
+                } else {
+                    // Fallback for non-UTF8: use lossy + lowercase to keep semantics.
+                    let lossy = os.to_string_lossy();
+                    let lower = lossy.to_lowercase();
+                    let mut out = String::with_capacity(lower.len() + 1);
+                    out.push('.');
+                    out.push_str(&lower);
+                    out
+                }
+            }
+            None => String::new(),
+        }
+    }
+
     let name = dir
         .file_name()
         .unwrap_or_default()
         .to_string_lossy()
         .to_string();
+
     let mut node = Node {
         name,
         path: dir.to_path_buf(),
@@ -503,53 +551,59 @@ pub fn scan_dir_to_node(
         Err(_) => return node,
     };
 
-    let mut dirs = Vec::new();
-    let mut files = Vec::new();
+    // Keep basenames with paths so we don't recompute names later.
+    let mut dirs: Vec<(String, PathBuf)> = Vec::new();
+    let mut files: Vec<(String, PathBuf)> = Vec::new();
+
+    let include_mode = !include_exts.is_empty();
+    let exclude_mode = !exclude_exts.is_empty();
 
     for ent in entries.flatten() {
         let path = ent.path();
-        let base = ent.file_name().to_string_lossy().to_string();
+        let base: String = ent.file_name().to_string_lossy().into_owned();
 
-        if ent.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
+        let is_dir = ent.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+        if is_dir {
             if exclude_dirs.contains(&base) {
                 continue;
             }
-            dirs.push(path);
-        } else {
-            if exclude_files.contains(&base) {
-                continue;
-            }
-            let ext = path
-                .extension()
-                .map(|e| format!(".{}", e.to_string_lossy().to_lowercase()))
-                .unwrap_or_default();
+            dirs.push((base, path));
+            continue;
+        }
 
-            let matches_file = if !include_exts.is_empty() {
+        if exclude_files.contains(&base) {
+            continue;
+        }
+
+        // Only compute/normalize extension when we actually need it.
+        let matches_file = if include_mode || exclude_mode {
+            let ext = dot_lower_last_ext(&path);
+            if include_mode {
                 include_exts.contains(&ext)
-            } else if !exclude_exts.is_empty() {
-                !exclude_exts.contains(&ext)
             } else {
-                true
-            };
-
-            if matches_file {
-                files.push(path);
+                !exclude_exts.contains(&ext)
             }
+        } else {
+            true
+        };
+
+        if matches_file {
+            files.push((base, path));
         }
     }
 
-    dirs.sort();
-    files.sort();
+    // Per-directory deterministic ordering: files by name, then dirs by name.
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    dirs.sort_by(|a, b| a.0.cmp(&b.0));
 
-    for f in files {
+    node.children.reserve(files.len() + dirs.len());
+
+    // Emit files first.
+    for (basename, path) in files {
         node.has_children = true;
         node.children.push(Node {
-            name: f
-                .file_name()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string(),
-            path: f,
+            name: basename,
+            path,
             is_dir: false,
             children: Vec::new(),
             expanded: false,
@@ -557,10 +611,12 @@ pub fn scan_dir_to_node(
         });
     }
 
-    for d in dirs {
-        let child = scan_dir_to_node(&d, include_exts, exclude_exts, exclude_dirs, exclude_files);
+    // Then recurse into directories.
+    for (_basename, path) in dirs {
+        let child = scan_dir_to_node(&path, include_exts, exclude_exts, exclude_dirs, exclude_files);
 
-        let child_visible = if !include_exts.is_empty() {
+        // Hide empty dirs when include-mode is active (preserves existing behavior).
+        let child_visible = if include_mode {
             !child.children.is_empty() || child.has_children
         } else {
             true
@@ -589,19 +645,11 @@ pub fn gather_paths_set(root: &Node) -> HashSet<PathBuf> {
 }
 
 pub fn dir_contains_file(node: &Node) -> bool {
-    if !node.is_dir {
-        return true;
-    }
-    for c in &node.children {
-        if !c.is_dir {
-            return true;
-        }
-        if dir_contains_file(c) {
-            return true;
-        }
-    }
-    false
+    // Fast path using the flag computed in `scan_dir_to_node`.
+    !node.is_dir || node.has_children
 }
+
+// src/core.rs
 
 pub fn collect_selected_paths(
     node: &Node,
@@ -610,6 +658,7 @@ pub fn collect_selected_paths(
     files_out: &mut Vec<PathBuf>,
     dirs_out: &mut Vec<PathBuf>,
 ) {
+    // Effective selection at this node (explicit overrides inherited).
     let my_effective = explicit
         .get(&node.path)
         .copied()
@@ -617,7 +666,8 @@ pub fn collect_selected_paths(
         .unwrap_or(false);
 
     if node.is_dir {
-        if my_effective && dir_contains_file(node) {
+        // Use the precomputed flag instead of rescanning the subtree.
+        if my_effective && node.has_children {
             dirs_out.push(node.path.clone());
         }
         let next_inherited = my_effective;
@@ -628,3 +678,4 @@ pub fn collect_selected_paths(
         files_out.push(node.path.clone());
     }
 }
+
