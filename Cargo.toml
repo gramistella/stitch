@@ -1,0 +1,18 @@
+[package]
+name = "stitch_rs"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+slint = "1"
+rfd = "0.14"
+regex = "1"
+anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+pathdiff = "0.2"
+serde_json = "1"
+dunce = "1"
+arboard = "3"
+
+[build-dependencies]
+slint-build = "1"

@@ -1,0 +1,215 @@
+import { VerticalBox, HorizontalBox, Button, LineEdit, CheckBox, ScrollView, TextEdit, ListView, Palette} from "std-widgets.slint";
+import "./assets/JetBrainsMonoNL-Regular.ttf";
+import "./assets/JetBrainsMono-Bold.ttf";
+
+export struct Row {
+    path: string,
+    name: string,
+    level: int,
+    is_dir: bool,
+    expanded: bool,
+    checked: bool,
+    has_children: bool,
+}
+
+component LabeledEdit inherits VerticalBox {
+    in property <string> label;
+    in-out property <string> value;
+    callback changed();
+
+    spacing: 4px;                     // tight label↔field gap
+    Text { text: root.label; font-size: 12px; }
+    LineEdit {
+        height: 30px;
+        text <=> root.value;
+        changed text => { root.changed(); }
+    }
+}
+
+export component AppWindow inherits Window {
+    width: 1300px;
+    height: 650px;
+    title: "Stitch";
+    default-font-family: "JetBrains Mono";
+
+    icon: @image-url("assets/icon.png");
+
+    in-out property <[Row]> tree-model;
+    in-out property <string> ext-filter;
+    in-out property <string> exclude-dirs;
+    in-out property <string> exclude-files;
+    in-out property <string> remove-prefix;
+    in-out property <string> remove-regex;
+    in-out property <bool> hierarchy-only;
+    in-out property <bool> dirs-only;
+    in-out property <string> last-refresh;
+    in-out property <string> output-text;
+    in-out property <[string]> output-lines;   // <-- add this
+
+    in-out property <bool> show-copy-toast;
+    in-out property <string> copy-toast-text;
+    
+    callback select-folder();
+    callback filter-changed();
+    callback toggle-expand(index: int);
+    callback toggle-check(index: int);
+    callback generate-output();
+    callback copy-output();
+
+    VerticalBox {
+        spacing: 10px;
+
+        // Header row
+        HorizontalBox {
+            spacing: 8px;
+
+            Button {
+                text: "Select Folder";
+                clicked => { root.select-folder(); }
+            }
+
+            // right-aligned cluster
+            Rectangle { // flexible spacer
+                horizontal-stretch: 1;
+                background: transparent;
+            }
+
+            CheckBox { text: "Hierarchy Only"; checked <=> root.hierarchy-only; }
+            CheckBox { text: "Directories Only"; checked <=> root.dirs-only; }
+
+            Text { text: root.last-refresh; }
+
+            Button {
+                text: "Generate Output";
+                clicked => { root.generate-output(); }
+            }
+
+            Button {
+                text: "Copy Output";
+                clicked => { root.copy-output(); }
+            }
+
+            // Tiny toast/feedback label
+            Text {
+                visible: root.show-copy-toast;
+                text: root.copy-toast-text;
+                color: #2b8a3e;
+                font-weight: 10;
+            }
+
+
+        }
+
+        // Main 3-column content
+        HorizontalBox {
+            spacing: 12px;
+
+            // LEFT PANE — inputs
+            VerticalBox {
+                width: 360px;
+            
+                LabeledEdit {
+                    label: "Filter Extensions (e.g., .py,.txt or '-.rs')";
+                    value <=> root.ext-filter;
+                    changed => { root.filter-changed(); }
+                }
+
+                LabeledEdit {
+                    label: "Exclude Directories (e.g., target,node_modules):";
+                    value <=> root.exclude-dirs;
+                    changed => { root.filter-changed(); }
+                }
+
+                LabeledEdit {
+                    label: "Exclude Files (e.g., LICENSE):";
+                    value <=> root.exclude-files;
+                    changed => { root.filter-changed(); }
+                }
+
+                LabeledEdit {
+                    label: "Remove lines starting with:";
+                    value <=> root.remove-prefix;
+                    changed => { root.filter-changed(); }
+                }
+
+                LabeledEdit {
+                    label: "Remove regex:";
+                    value <=> root.remove-regex;
+                    changed => { root.filter-changed(); }
+                }
+            }
+
+
+            Rectangle {
+                horizontal-stretch: 1;
+                border-width: 1px;
+                border-radius: 4px;
+                border-color: Palette.border;
+                background: Palette.alternate-background.darker(0.06);  // slightly darker than UI
+                ScrollView {
+                    viewport1 := VerticalBox {
+                        spacing: 0px;
+                        padding: 0px;
+
+                        for row[i] in root.tree-model : HorizontalBox {
+                            spacing: 2px;
+
+                            Rectangle { width: max(0px, row.level * 16px); height: 1px; background: transparent; }
+
+                            Rectangle {
+                                width: 18px; height: 18px; background: transparent;
+                                TouchArea {
+                                    clicked => { if (row.is_dir && row.has_children) { root.toggle-expand(i); } }
+                                    Text {
+                                        vertical-alignment: center;
+                                        horizontal-alignment: center;
+                                        text: row.is_dir ? (row.has_children ? (row.expanded ? "▾" : "▸") : "·") : " ";
+                                    }
+                                }
+                            }
+
+                            CheckBox {
+                                checked: row.checked;
+                                toggled => { root.toggle-check(i); }
+                            }
+
+                            Text { 
+                                text: row.name;
+                            }
+                        }
+                    }
+                }
+            }
+
+
+            // RIGHT PANE — output
+            VerticalBox {
+                spacing: 6px;
+                horizontal-stretch: 2;
+                Text { text: "Output:"; }
+
+                Rectangle {
+                    border-width: 1px;
+                    border-radius: 4px;
+                    clip: true;
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+                    border-color: Palette.border;
+                    background: Palette.alternate-background.darker(0.06); 
+
+                    // virtualized, smooth scrolling
+                    ListView {
+                        for line[i] in root.output-lines : Text {
+                            text: line;
+                            wrap: no-wrap;        // set to no-wrap for even faster scroll
+                            width: parent.width;    // wrap to pane width
+                            font-size: 11px;
+                        }
+                    }
+                }
+            }
+
+        }
+    }
+}
+
