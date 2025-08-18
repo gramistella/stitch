@@ -1,0 +1,87 @@
+name: Release (portable)
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write  
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux GNU
+          - os: ubuntu-latest
+            label: linux-gnu
+            cmd: just tgz
+            glob: dist/*.tar.gz
+            target: ""
+            setup: linux-gnu
+          # Windows portable exe (zip)
+          - os: windows-latest
+            label: windows
+            cmd: just exe
+            glob: dist/*.zip
+            target: ""
+            setup: windows
+          # macOS .dmg
+          - os: macos-latest
+            label: macos
+            cmd: just dmg
+            glob: dist/*.dmg
+            target: ""
+            setup: macos
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-${{ matrix.target || 'default' }}-${{ hashFiles('**/Cargo.lock','**/Cargo.toml') }}
+
+      - name: Install just
+        run: cargo install just --locked || true
+        shell: bash
+
+      # Extra setup per-platform when needed
+      - name: Setup (linux-musl)
+        if: ${{ matrix.setup == 'linux-musl' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          rustup target add x86_64-unknown-linux-musl || true
+        shell: bash
+
+      # Build & package via the per-OS just recipe
+      - name: Build package (${{ matrix.label }})
+        run: ${{ matrix.cmd }}
+        shell: bash
+
+      - name: Upload artifact (${{ matrix.label }})
+        uses: actions/upload-artifact@v4
+        with:
+          name: stitch-${{ matrix.label }}
+          path: ${{ matrix.glob }}
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.glob }}
