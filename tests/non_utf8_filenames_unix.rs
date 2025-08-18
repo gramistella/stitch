@@ -13,7 +13,7 @@ mod non_utf8 {
         let root = tmp.path();
 
         // "fo\x80" (invalid UTF-8)
-        let mut os = OsString::from_vec(vec![b'f', b'o', 0x80]);
+        let os = OsString::from_vec(vec![b'f', b'o', 0x80]);
         let path = root.join(&os);
         fs::write(&path, "x").unwrap();
 
