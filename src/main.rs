@@ -1,36 +1,16 @@
-// src/main.rs
 // A Rust rewrite of the Tkinter app using Slint for the desktop UI.
-// - Left: folder selection, filters, and a "flat" tree view with expand/collapse + checkboxes
-// - Right: Generate Output button, last refresh label, and an output text area
-// Notes:
-// * The tree view is implemented as a flattened list for simplicity. Each row shows an expand glyph, a checkbox, and a name, indented by level.
-// * We scan the full tree (respecting filters) when the folder or filters change.
-// * Check state inheritance: a node uses its own explicit state if present; otherwise inherits the nearest ancestor's effective state (default false).
-// * Toggling a directory clears explicit states for all its descendants, matching the Python semantics.
-
-
-
-
-
 
 #![allow(clippy::needless_return)] // What about a comment here?
 
-/* 
-This is a multi-line comment.
-It can span
-multiple lines.
-*/
-
 use std::{
     cell::RefCell,
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     rc::Rc,
     time::SystemTime,
 };
 
-use anyhow::Context;
 use chrono::Local;
 use regex::Regex;
 use slint::{Model, ModelRc, VecModel};
@@ -83,7 +63,7 @@ fn main() -> anyhow::Result<()> {
     app.set_output_text("".into());
     app.set_show_copy_toast(false);
     app.set_copy_toast_text("".into());
-    
+
     let state = Rc::new(RefCell::new(AppState {
         poll_interval_ms: 30_000,
         ..Default::default()
@@ -172,7 +152,7 @@ fn main() -> anyhow::Result<()> {
             // If the dialog already exists, clear it and show it again.
             if let Some(dlg) = state.borrow().select_dialog.as_ref() {
                 dlg.set_text("".into());
-                dlg.show();
+                let _ = dlg.show();
                 return;
             }
 
@@ -186,10 +166,10 @@ fn main() -> anyhow::Result<()> {
             let app_weak_apply = app_weak.clone();
             dlg.on_apply(move |text| {
                 if let Some(app) = app_weak_apply.upgrade() {
-                    apply_selection_from_text(&app, &state_apply, &text.to_string());
+                    apply_selection_from_text(&app, &state_apply, text.as_ref());
                 }
                 if let Some(d) = dlg_weak_apply.upgrade() {
-                    d.hide(); // safe: don’t drop in this callback
+                    let _ = d.hide(); // safe: don’t drop in this callback
                 }
             });
 
@@ -197,22 +177,19 @@ fn main() -> anyhow::Result<()> {
             let dlg_weak_cancel = dlg.as_weak();
             dlg.on_cancel(move || {
                 if let Some(d) = dlg_weak_cancel.upgrade() {
-                    d.hide();
+                    let _ = d.hide();
                 }
             });
 
             // Keep it alive while the app runs; reuse on next open
             state.borrow_mut().select_dialog = Some(dlg);
-            state.borrow().select_dialog.as_ref().unwrap().show();
+            let _ = state.borrow().select_dialog.as_ref().unwrap().show();
         });
     }
-
-
 
     app.run()?;
     Ok(())
 }
-
 
 /* === UI EVENT HANDLERS === */
 
@@ -250,16 +227,14 @@ fn apply_selection_from_text(app: &AppWindow, state: &Rc<RefCell<AppState>>, tex
             for c in &node.children {
                 walk_and_mark(c, project_root, wanted, explicit);
             }
-        } else {
-            if let Some(rel) = pathdiff::diff_paths(&node.path, project_root) {
-                let key = rel
-                    .iter()
-                    .map(|c| c.to_string_lossy())
-                    .collect::<Vec<_>>()
-                    .join("/");
-                if wanted.contains(&key) {
-                    explicit.insert(node.path.clone(), true);
-                }
+        } else if let Some(rel) = pathdiff::diff_paths(&node.path, project_root) {
+            let key = rel
+                .iter()
+                .map(|c| c.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            if wanted.contains(&key) {
+                explicit.insert(node.path.clone(), true);
             }
         }
     }
@@ -335,7 +310,6 @@ fn parse_hierarchy_text(text: &str) -> Option<std::collections::HashSet<String>>
     Some(paths)
 }
 
-
 fn on_select_folder(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
     if let Some(dir) = rfd::FileDialog::new().set_directory(".").pick_folder() {
         {
@@ -409,25 +383,27 @@ fn on_generate_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let mut rels = Vec::new();
         if want_dirs_only {
             for d in &dirs {
-                if let Some(r) = pathdiff::diff_paths(d, selected_dir) {
-                    if r != PathBuf::from("") {
-                        rels.push(path_to_unix(&r));
-                    }
+                if let Some(r) = pathdiff::diff_paths(d, selected_dir)
+                    && r != PathBuf::from("")
+                {
+                    rels.push(path_to_unix(&r));
                 }
             }
         } else {
             for f in &files {
-                if let Some(r) = pathdiff::diff_paths(f, selected_dir) {
-                    if r != PathBuf::from("") {
-                        rels.push(path_to_unix(&r));
-                    }
+                if let Some(r) = pathdiff::diff_paths(f, selected_dir)
+                    && r != PathBuf::from("")
+                {
+                    rels.push(path_to_unix(&r));
                 }
             }
         }
         (files, dirs, rels)
     };
 
-    if (!want_dirs_only && selected_files.is_empty()) || (want_dirs_only && selected_dirs.is_empty()) {
+    if (!want_dirs_only && selected_files.is_empty())
+        || (want_dirs_only && selected_dirs.is_empty())
+    {
         set_output(app, "No items selected.\n");
         update_last_refresh(app);
         return;
@@ -452,10 +428,18 @@ fn on_generate_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let s = state.borrow();
         s.selected_directory
             .as_ref()
-            .map(|p| p.file_name().unwrap_or_default().to_string_lossy().to_string())
+            .map(|p| {
+                p.file_name()
+                    .unwrap_or_default()
+                    .to_string_lossy()
+                    .to_string()
+            })
             .unwrap_or_else(|| "root".into())
     };
-    out.push_str(&render_unicode_tree_from_paths(&relative_paths, Some(&root_name)));
+    out.push_str(&render_unicode_tree_from_paths(
+        &relative_paths,
+        Some(&root_name),
+    ));
 
     if !hierarchy_only && !app.get_dirs_only() {
         out.push_str("\n=== FILE CONTENTS ===\n\n");
@@ -467,7 +451,7 @@ fn on_generate_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
             let rr = s.remove_regex.clone();
             (rp, rr)
         };
-        
+
         let s_dir = state.borrow().selected_directory.clone().unwrap();
 
         for fp in selected_files {
@@ -487,10 +471,16 @@ fn on_generate_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
                 contents = rr.replace_all(&contents, "").to_string();
             }
 
-            out.push_str(&format!("--- Start of file: {} ---\n", rel.to_string_lossy()));
+            out.push_str(&format!(
+                "--- Start of file: {} ---\n",
+                rel.to_string_lossy()
+            ));
             out.push_str(&contents);
             out.push('\n');
-            out.push_str(&format!("--- End of file: {} ---\n\n", rel.to_string_lossy()));
+            out.push_str(&format!(
+                "--- End of file: {} ---\n\n",
+                rel.to_string_lossy()
+            ));
         }
     }
 
@@ -507,7 +497,7 @@ fn on_copy_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
 
         // Hide after a moment
         {
-            let mut s = state.borrow_mut();
+            let s = state.borrow_mut();
             let app_weak = app.as_weak();
             s.copy_toast_timer.start(
                 slint::TimerMode::SingleShot,
@@ -533,7 +523,7 @@ fn on_copy_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
 
     // Auto-hide the toast
     {
-        let mut s = state.borrow_mut();
+        let s = state.borrow_mut();
         let app_weak = app.as_weak();
         s.copy_toast_timer.start(
             slint::TimerMode::SingleShot,
@@ -546,7 +536,6 @@ fn on_copy_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         );
     }
 }
-
 
 /* === CORE LOGIC === */
 
@@ -588,13 +577,7 @@ fn refresh_flat_model(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
     let rows = {
         let s = state.borrow();
         if let Some(root) = &s.root_node {
-            flatten_tree(
-                root,
-                &s.explicit_states,
-                None,
-                0,
-                &mut Vec::new(), // placeholder, replaced by ret
-            )
+            flatten_tree(root, &s.explicit_states, None, 0)
         } else {
             Vec::new()
         }
@@ -614,7 +597,11 @@ fn parse_filters_from_ui(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
     let remove_regex_str = {
         let raw = app.get_remove_regex().to_string();
         let cleaned = clean_remove_regex(&raw);
-        if cleaned.trim().is_empty() { None } else { Some(cleaned) }
+        if cleaned.trim().is_empty() {
+            None
+        } else {
+            Some(cleaned)
+        }
     };
 
     let mut st = state.borrow_mut();
@@ -676,7 +663,11 @@ fn collect_selected_paths(
     files_out: &mut Vec<PathBuf>,
     dirs_out: &mut Vec<PathBuf>,
 ) {
-    let my_effective = explicit.get(&node.path).copied().or(inherited).unwrap_or(false);
+    let my_effective = explicit
+        .get(&node.path)
+        .copied()
+        .or(inherited)
+        .unwrap_or(false);
 
     if node.is_dir {
         if my_effective && dir_contains_file(node) {
@@ -687,10 +678,8 @@ fn collect_selected_paths(
         for c in &node.children {
             collect_selected_paths(c, explicit, Some(next_inherited), files_out, dirs_out);
         }
-    } else {
-        if my_effective {
-            files_out.push(node.path.clone());
-        }
+    } else if my_effective {
+        files_out.push(node.path.clone());
     }
 }
 
@@ -709,30 +698,11 @@ fn dir_contains_file(node: &Node) -> bool {
     false
 }
 
-// src/main.rs
-fn build_tree_from_rel_paths(_paths: &[String]) -> BTreeMap<String, BTreeMap<String, serde_json::Value>> {
-    // Legacy helper no longer used by rendering. Keep a harmless implementation to satisfy the type.
-    BTreeMap::new()
-}
-
 fn split_prefix_list(raw: &str) -> Vec<String> {
     raw.split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
-}
-
-
-fn render_unicode_tree(
-    _tree: &BTreeMap<String, BTreeMap<String, serde_json::Value>>,
-    root_name: Option<&str>,
-) -> String {
-    let mut out = String::new();
-    if let Some(root) = root_name {
-        out.push_str(root);
-        out.push('\n');
-    }
-    out
 }
 
 // src/main.rs
@@ -788,7 +758,6 @@ fn render_unicode_tree_from_paths(paths: &[String], root_name: Option<&str>) -> 
     out
 }
 
-
 /// Drops full lines that start with any prefix (after leading whitespace),
 /// and trims inline comments *only* when the prefix is preceded by whitespace.
 /// Example kept: `http://example.com` (no space before `//`)
@@ -808,7 +777,10 @@ fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> Strin
             .unwrap_or_else(|| line.len());
 
         // Full-line comment? (after leading whitespace)
-        if prefixes.iter().any(|p| !p.is_empty() && line[first_non_ws..].starts_with(p)) {
+        if prefixes
+            .iter()
+            .any(|p| !p.is_empty() && line[first_non_ws..].starts_with(p))
+        {
             continue 'line; // drop the whole line
         }
 
@@ -818,13 +790,15 @@ fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> Strin
 
         for (pos, ch) in line.char_indices() {
             // Only consider prefixes from the first non-ws onward
-            if pos < first_non_ws { 
+            if pos < first_non_ws {
                 prev_ch = Some(ch);
                 continue;
             }
 
             for p in prefixes {
-                if p.is_empty() { continue; }
+                if p.is_empty() {
+                    continue;
+                }
                 if line[pos..].starts_with(p) {
                     // Only cut if the previous character exists and is whitespace
                     if prev_ch.map(|c| c.is_whitespace()).unwrap_or(false) {
@@ -833,14 +807,16 @@ fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> Strin
                     }
                 }
             }
-            if cut_at.is_some() { break; }
+            if cut_at.is_some() {
+                break;
+            }
             prev_ch = Some(ch);
         }
 
         let kept = if let Some(pos) = cut_at {
             // Trim trailing spaces/tabs before the comment we cut
             let left = &line[..pos];
-            left.trim_end_matches(|c: char| c == ' ' || c == '\t').to_string()
+            left.trim_end_matches([' ', '\t']).to_string()
         } else {
             line.to_string()
         };
@@ -916,7 +892,11 @@ fn scan_dir_to_node(
     exclude_dirs: &HashSet<String>,
     exclude_files: &HashSet<String>,
 ) -> Node {
-    let name = dir.file_name().unwrap_or_default().to_string_lossy().to_string();
+    let name = dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
     let mut node = Node {
         name,
         path: dir.to_path_buf(),
@@ -973,7 +953,11 @@ fn scan_dir_to_node(
     for f in files {
         node.has_children = true;
         node.children.push(Node {
-            name: f.file_name().unwrap_or_default().to_string_lossy().to_string(),
+            name: f
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
             path: f,
             is_dir: false,
             children: Vec::new(),
@@ -997,14 +981,14 @@ fn scan_dir_to_node(
 
         if child_visible {
             // Mark this node as having (visible) children and keep the directory.
-            node.has_children = node.has_children || !child.children.is_empty() || child.has_children;
+            node.has_children =
+                node.has_children || !child.children.is_empty() || child.has_children;
             node.children.push(child);
         }
     }
 
     node
 }
-
 
 fn gather_paths_set(root: &Node) -> HashSet<PathBuf> {
     let mut set = HashSet::new();
@@ -1024,7 +1008,6 @@ fn flatten_tree(
     explicit: &HashMap<PathBuf, bool>,
     inherited: Option<bool>,
     level: usize,
-    _scratch: &mut Vec<Row>, // unused, kept to mirror interface
 ) -> Vec<Row> {
     let mut rows = Vec::new();
     fn walk(
@@ -1034,7 +1017,11 @@ fn flatten_tree(
         level: usize,
         rows: &mut Vec<Row>,
     ) {
-        let effective = explicit.get(&n.path).copied().or(inherited).unwrap_or(false);
+        let effective = explicit
+            .get(&n.path)
+            .copied()
+            .or(inherited)
+            .unwrap_or(false);
         let has_children = !n.children.is_empty();
         rows.push(Row {
             path: n.path.to_string_lossy().to_string().into(),
@@ -1111,7 +1098,6 @@ fn set_output(app: &AppWindow, s: &str) {
     let model = slint::VecModel::from(lines);
     app.set_output_lines(slint::ModelRc::new(model));
 }
-
 
 fn update_last_refresh(app: &AppWindow) {
     let now_str = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
@@ -1210,7 +1196,6 @@ fn on_check_updates(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         }
     }
 }
-
 
 /* === SLINT-GENERATED TYPES (from .slint) ===
 AppWindow, Row
