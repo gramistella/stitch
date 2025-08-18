@@ -1,5 +1,5 @@
 import { VerticalBox, HorizontalBox, Button, LineEdit, CheckBox, ScrollView, TextEdit, ListView, Palette} from "std-widgets.slint";
-import "./assets/JetBrainsMonoNL-Regular.ttf";
+import "./assets/JetBrainsMono-Regular.ttf";
 
 export struct Row {
     path: string,
@@ -60,11 +60,13 @@ export component SelectFromTextDialog inherits Window {
 export component AppWindow inherits Window {
     width: 1300px;
     height: 650px;
-    title: "Stitch";
+    
     default-font-family: "JetBrains Mono";
 
     icon: @image-url("assets/icon.png");
-
+    in-out property <string> app-version;
+    title: "Stitch v" + root.app-version;
+    
     in-out property <[Row]> tree-model;
     in-out property <string> ext-filter;
     in-out property <string> exclude-dirs;
@@ -76,6 +78,7 @@ export component AppWindow inherits Window {
     in-out property <string> last-refresh;
     in-out property <string> output-text;
     in-out property <[string]> output-lines;
+
 
 
     in-out property <bool> show-copy-toast;
@@ -243,9 +246,10 @@ export component AppWindow inherits Window {
                     vertical-stretch: 1;
                     border-color: Palette.border;
                     background: Palette.alternate-background.darker(0.06); 
-
+                    
                     TextEdit {
                         text <=> root.output-text;
+                        
                         read-only: true;
                         wrap: no-wrap;
 

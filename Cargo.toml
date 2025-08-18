@@ -16,3 +16,10 @@ arboard = "3"
 
 [build-dependencies]
 slint-build = "1"
+
+[package.metadata.bundle]
+name = "Stitch"
+identifier = "com.gramistella.stitch"
+icon = ["ui/assets/icon.icns"]  # macOS uses .icns
+category = "Developer Tool"
+short_description = "Select files from a project and stitch them into one text."
