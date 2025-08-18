@@ -151,7 +151,7 @@ Issues and PRs welcome—whether for defaults (exclusions), performance tweaks, 
 
 ## 📄 License
 
-MIT © 2025 Giovanni Ramistella
+This project is licensed under the **MIT License** — see [LICENSE](./LICENSE) for details.
 
 It also bundles third-party assets:
 
