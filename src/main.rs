@@ -8,6 +8,11 @@
 // * Check state inheritance: a node uses its own explicit state if present; otherwise inherits the nearest ancestor's effective state (default false).
 // * Toggling a directory clears explicit states for all its descendants, matching the Python semantics.
 
+
+
+
+
+
 #![allow(clippy::needless_return)] // What about a comment here?
 
 /* 
@@ -58,6 +63,7 @@ struct AppState {
     exclude_dirs: HashSet<String>,
     exclude_files: HashSet<String>,
     copy_toast_timer: slint::Timer,
+    select_dialog: Option<SelectFromTextDialog>,
 }
 
 // src/main.rs
@@ -158,6 +164,49 @@ fn main() -> anyhow::Result<()> {
         });
     }
 
+    {
+        let app_weak = app.as_weak();
+        let state = Rc::clone(&state);
+
+        app.on_select_from_text(move || {
+            // If the dialog already exists, clear it and show it again.
+            if let Some(dlg) = state.borrow().select_dialog.as_ref() {
+                dlg.set_text("".into());
+                dlg.show();
+                return;
+            }
+
+            // Create dialog once and keep a strong handle in state
+            let dlg = SelectFromTextDialog::new().expect("create SelectFromTextDialog");
+            dlg.set_text("".into());
+
+            // Apply → run selection, then hide (do NOT drop here)
+            let dlg_weak_apply = dlg.as_weak();
+            let state_apply = Rc::clone(&state);
+            let app_weak_apply = app_weak.clone();
+            dlg.on_apply(move |text| {
+                if let Some(app) = app_weak_apply.upgrade() {
+                    apply_selection_from_text(&app, &state_apply, &text.to_string());
+                }
+                if let Some(d) = dlg_weak_apply.upgrade() {
+                    d.hide(); // safe: don’t drop in this callback
+                }
+            });
+
+            // Cancel → just hide (do NOT drop here)
+            let dlg_weak_cancel = dlg.as_weak();
+            dlg.on_cancel(move || {
+                if let Some(d) = dlg_weak_cancel.upgrade() {
+                    d.hide();
+                }
+            });
+
+            // Keep it alive while the app runs; reuse on next open
+            state.borrow_mut().select_dialog = Some(dlg);
+            state.borrow().select_dialog.as_ref().unwrap().show();
+        });
+    }
+
 
 
     app.run()?;
@@ -166,6 +215,126 @@ fn main() -> anyhow::Result<()> {
 
 
 /* === UI EVENT HANDLERS === */
+
+fn apply_selection_from_text(app: &AppWindow, state: &Rc<RefCell<AppState>>, text: &str) {
+    // Need an active folder & a scanned tree
+    let (root_opt, selected_dir_opt) = {
+        let s = state.borrow();
+        (s.root_node.clone(), s.selected_directory.clone())
+    };
+    let (root, selected_dir) = match (root_opt, selected_dir_opt) {
+        (Some(r), Some(d)) => (r, d),
+        _ => return,
+    };
+
+    // Parse the hierarchy text (returns relative POSIX-style paths like "src/lib.rs")
+    let wanted = match parse_hierarchy_text(text) {
+        Some(s) if !s.is_empty() => s,
+        _ => return,
+    };
+
+    // Clear previous explicit states
+    {
+        let mut s = state.borrow_mut();
+        s.explicit_states.clear();
+    }
+
+    // Walk the current tree; set explicit true for FILES whose relpath matches the pasted set
+    fn walk_and_mark(
+        node: &Node,
+        project_root: &Path,
+        wanted: &std::collections::HashSet<String>,
+        explicit: &mut std::collections::HashMap<PathBuf, bool>,
+    ) {
+        if node.is_dir {
+            for c in &node.children {
+                walk_and_mark(c, project_root, wanted, explicit);
+            }
+        } else {
+            if let Some(rel) = pathdiff::diff_paths(&node.path, project_root) {
+                let key = rel
+                    .iter()
+                    .map(|c| c.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                if wanted.contains(&key) {
+                    explicit.insert(node.path.clone(), true);
+                }
+            }
+        }
+    }
+
+    {
+        let mut s = state.borrow_mut();
+        walk_and_mark(&root, &selected_dir, &wanted, &mut s.explicit_states);
+    }
+
+    // Update UI and output
+    refresh_flat_model(app, state);
+    on_generate_output(app, state);
+}
+
+fn parse_hierarchy_text(text: &str) -> Option<std::collections::HashSet<String>> {
+    use std::collections::HashSet;
+
+    let mut lines = text.lines();
+
+    // Require at least one line (the root folder name). We ignore its content.
+    let _root = lines.next()?;
+
+    let mut paths: HashSet<String> = HashSet::new();
+    let mut parts: Vec<String> = Vec::new();
+
+    for raw in lines {
+        let line = raw.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+
+        // Find first "content" character (not whitespace, not box-drawing)
+        // and compute level in multiples of 4 (matching how the tree is rendered).
+        let mut name_char_idx: Option<usize> = None;
+        for (i, ch) in line.chars().enumerate() {
+            if ch != '│' && ch != '└' && ch != '├' && ch != '─' && !ch.is_whitespace() {
+                name_char_idx = Some(i);
+                break;
+            }
+        }
+        let name_char_idx = match name_char_idx {
+            Some(i) => i,
+            None => continue,
+        };
+
+        let level = if name_char_idx > 0 {
+            (name_char_idx.saturating_sub(1)) / 4
+        } else {
+            0
+        };
+
+        // Slice at char index
+        let byte_start = line
+            .char_indices()
+            .nth(name_char_idx)
+            .map(|(b, _)| b)
+            .unwrap_or(0);
+        let name = line[byte_start..].trim();
+        if name.is_empty() {
+            continue;
+        }
+
+        if parts.len() > level {
+            parts.truncate(level);
+        }
+        parts.push(name.to_string());
+
+        // Build normalized (POSIX-style) relative path
+        let rel = parts.join("/");
+        paths.insert(rel);
+    }
+
+    Some(paths)
+}
+
 
 fn on_select_folder(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
     if let Some(dir) = rfd::FileDialog::new().set_directory(".").pick_folder() {
@@ -298,22 +467,27 @@ fn on_generate_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
             let rr = s.remove_regex.clone();
             (rp, rr)
         };
+        
+        let s_dir = state.borrow().selected_directory.clone().unwrap();
 
         for fp in selected_files {
-            let s_dir = state.borrow().selected_directory.clone().unwrap();
-            let rel = pathdiff::diff_paths(&fp, &s_dir).unwrap_or_else(|| PathBuf::from(fp.file_name().unwrap_or_default()));
-            out.push_str(&format!("--- Start of file: {} ---\n", rel.to_string_lossy()));
+            let rel = pathdiff::diff_paths(&fp, &s_dir)
+                .unwrap_or_else(|| PathBuf::from(fp.file_name().unwrap_or_default()));
 
-            let mut contents = fs::read_to_string(&fp).unwrap_or_else(|e| format!("Error reading file: {e}"));
+            // Only include text files we can read as UTF-8; otherwise skip the whole block.
+            let mut contents = match fs::read_to_string(&fp) {
+                Ok(c) => c,
+                Err(_) => continue, // <-- omit the entire block for unreadable files
+            };
 
             if !remove_prefixes.is_empty() {
                 contents = strip_lines_and_inline_comments(&contents, &remove_prefixes);
             }
-
             if let Some(rr) = &remove_regex_opt {
                 contents = rr.replace_all(&contents, "").to_string();
             }
 
+            out.push_str(&format!("--- Start of file: {} ---\n", rel.to_string_lossy()));
             out.push_str(&contents);
             out.push('\n');
             out.push_str(&format!("--- End of file: {} ---\n\n", rel.to_string_lossy()));
@@ -762,18 +936,15 @@ fn scan_dir_to_node(
 
     for ent in entries.flatten() {
         let path = ent.path();
-        let name = ent
-            .file_name()
-            .to_string_lossy()
-            .to_string();
+        let base = ent.file_name().to_string_lossy().to_string();
 
         if ent.file_type().map(|ft| ft.is_dir()).unwrap_or(false) {
-            if exclude_dirs.contains(&name) {
+            if exclude_dirs.contains(&base) {
                 continue;
             }
             dirs.push(path);
         } else {
-            if exclude_files.contains(&name) {
+            if exclude_files.contains(&base) {
                 continue;
             }
             let ext = path
@@ -781,14 +952,15 @@ fn scan_dir_to_node(
                 .map(|e| format!(".{}", e.to_string_lossy().to_lowercase()))
                 .unwrap_or_default();
 
-            let matches = if !include_exts.is_empty() {
+            let matches_file = if !include_exts.is_empty() {
                 include_exts.contains(&ext)
             } else if !exclude_exts.is_empty() {
                 !exclude_exts.contains(&ext)
             } else {
                 true
             };
-            if matches {
+
+            if matches_file {
                 files.push(path);
             }
         }
@@ -797,12 +969,7 @@ fn scan_dir_to_node(
     dirs.sort();
     files.sort();
 
-    for d in dirs {
-        let child = scan_dir_to_node(&d, include_exts, exclude_exts, exclude_dirs, exclude_files);
-        // show directory even if empty (consistent with Python behavior unless explicitly excluded)
-        node.has_children = node.has_children || !child.children.is_empty() || child.has_children;
-        node.children.push(child);
-    }
+    // Add files that pass the filter logic
     for f in files {
         node.has_children = true;
         node.children.push(Node {
@@ -814,8 +981,30 @@ fn scan_dir_to_node(
             has_children: false,
         });
     }
+
+    // Recurse into subdirectories. When an "include extensions" filter is active,
+    // only include a directory if its subtree contains at least one matching file.
+    for d in dirs {
+        let child = scan_dir_to_node(&d, include_exts, exclude_exts, exclude_dirs, exclude_files);
+
+        let child_visible = if !include_exts.is_empty() {
+            // With include filters: only keep directories that have any visible content.
+            !child.children.is_empty() || child.has_children
+        } else {
+            // Without include filters: keep directories regardless (previous behavior).
+            true
+        };
+
+        if child_visible {
+            // Mark this node as having (visible) children and keep the directory.
+            node.has_children = node.has_children || !child.children.is_empty() || child.has_children;
+            node.children.push(child);
+        }
+    }
+
     node
 }
+
 
 fn gather_paths_set(root: &Node) -> HashSet<PathBuf> {
     let mut set = HashSet::new();
@@ -883,12 +1072,42 @@ fn set_tree_model(app: &AppWindow, rows: Vec<Row>) {
     app.set_tree_model(ModelRc::new(model));
 }
 
-fn set_output(app: &AppWindow, s: &str) {
-    // keep the full text for clipboard/export
-    app.set_output_text(s.into());
+// NEW: collapse runs of blank lines to a single blank line
+fn collapse_consecutive_blank_lines(s: &str) -> String {
+    let mut out_lines = Vec::new();
+    let mut prev_blank = false;
 
-    // feed a virtualized list (one item per line)
-    let lines: Vec<slint::SharedString> = s.lines().map(|l| l.into()).collect();
+    for line in s.lines() {
+        let is_blank = line.trim().is_empty();
+        if is_blank && prev_blank {
+            continue; // skip extra blank lines
+        }
+        out_lines.push(line);
+        prev_blank = is_blank;
+    }
+
+    let mut normalized = out_lines.join("\n");
+    if s.ends_with('\n') {
+        normalized.push('\n'); // preserve trailing newline if present
+    }
+    normalized
+}
+
+// REPLACE the existing set_output with this
+fn set_output(app: &AppWindow, s: &str) {
+    // 1) Normalize: reduce multiple blank lines to a single blank line
+    let normalized = collapse_consecutive_blank_lines(s);
+
+    // 2) Keep the full (normalized) text for clipboard/export
+    app.set_output_text(normalized.clone().into());
+
+    // 3) For on-screen viewing, preserve spaces by mapping ' ' -> NBSP
+    //    (Slint may visually collapse runs of regular spaces.)
+    let lines: Vec<slint::SharedString> = normalized
+        .lines()
+        .map(|l| l.replace(' ', "\u{00A0}").into())
+        .collect();
+
     let model = slint::VecModel::from(lines);
     app.set_output_lines(slint::ModelRc::new(model));
 }

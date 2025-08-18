@@ -1,6 +1,5 @@
 import { VerticalBox, HorizontalBox, Button, LineEdit, CheckBox, ScrollView, TextEdit, ListView, Palette} from "std-widgets.slint";
 import "./assets/JetBrainsMonoNL-Regular.ttf";
-import "./assets/JetBrainsMono-Bold.ttf";
 
 export struct Row {
     path: string,
@@ -17,12 +16,44 @@ component LabeledEdit inherits VerticalBox {
     in-out property <string> value;
     callback changed();
 
-    spacing: 4px;                     // tight label↔field gap
+    spacing: 2px;                     // tight label↔field gap
     Text { text: root.label; font-size: 12px; }
     LineEdit {
         height: 30px;
         text <=> root.value;
         changed text => { root.changed(); }
+    }
+}
+
+export component SelectFromTextDialog inherits Window {
+    width: 520px;
+    height: 420px;
+    title: "Select from Text";
+    default-font-family: "JetBrains Mono";
+    icon: @image-url("assets/icon.png");
+
+    in-out property <string> text;
+    callback apply(text: string);
+    callback cancel();
+
+    VerticalBox {
+        spacing: 8px;
+        padding: 10px;
+
+        Text { text: "Paste hierarchy text below (first line must be the root folder):"; }
+
+        TextEdit {
+            text <=> root.text;
+            wrap: word-wrap;
+            vertical-stretch: 1;
+        }
+
+        HorizontalBox {
+            spacing: 8px;
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Button { text: "Apply";  clicked => { root.apply(root.text); } }
+            Button { text: "Cancel"; clicked => { root.cancel(); } }
+        }
     }
 }
 
@@ -44,7 +75,8 @@ export component AppWindow inherits Window {
     in-out property <bool> dirs-only;
     in-out property <string> last-refresh;
     in-out property <string> output-text;
-    in-out property <[string]> output-lines;   // <-- add this
+    in-out property <[string]> output-lines;
+
 
     in-out property <bool> show-copy-toast;
     in-out property <string> copy-toast-text;
@@ -55,6 +87,7 @@ export component AppWindow inherits Window {
     callback toggle-check(index: int);
     callback generate-output();
     callback copy-output();
+    callback select-from-text();
 
     VerticalBox {
         spacing: 10px;
@@ -78,6 +111,7 @@ export component AppWindow inherits Window {
             CheckBox { text: "Directories Only"; checked <=> root.dirs-only; }
 
             Text { text: root.last-refresh; }
+            
 
             Button {
                 text: "Generate Output";
@@ -139,42 +173,55 @@ export component AppWindow inherits Window {
                 }
             }
 
-
-            Rectangle {
+            VerticalBox { 
                 horizontal-stretch: 1;
-                border-width: 1px;
-                border-radius: 4px;
-                border-color: Palette.border;
-                background: Palette.alternate-background.darker(0.06);  // slightly darker than UI
-                ScrollView {
-                    viewport1 := VerticalBox {
-                        spacing: 0px;
-                        padding: 0px;
 
-                        for row[i] in root.tree-model : HorizontalBox {
-                            spacing: 2px;
+                Button {
+                    text: "Select from Text...";
+                    clicked => { root.select-from-text(); }
+                }
 
-                            Rectangle { width: max(0px, row.level * 16px); height: 1px; background: transparent; }
+                Rectangle {
+                    horizontal-stretch: 1;
+                    border-width: 1px;
+                    border-radius: 4px;
+                    border-color: Palette.border;
+                    background: Palette.alternate-background.darker(0.06);  // slightly darker than UI
+                    ScrollView {
+                        viewport1 := VerticalBox {
+                            spacing: 0px;
+                            padding: 0px;
 
-                            Rectangle {
-                                width: 18px; height: 18px; background: transparent;
-                                TouchArea {
-                                    clicked => { if (row.is_dir && row.has_children) { root.toggle-expand(i); } }
-                                    Text {
-                                        vertical-alignment: center;
-                                        horizontal-alignment: center;
-                                        text: row.is_dir ? (row.has_children ? (row.expanded ? "▾" : "▸") : "·") : " ";
+                            for row[i] in root.tree-model : HorizontalBox {
+                                spacing: 8px;
+                                height: 30px;
+
+                                Rectangle { width: max(0px, row.level * 16px); height: 1px; background: transparent; }
+
+                                Rectangle {
+                                    width: 18px; height: parent.height; background: transparent;
+                                    TouchArea {
+                                        clicked => { if (row.is_dir && row.has_children) { root.toggle-expand(i); } }
+                                        Text {
+                                            vertical-alignment: center;
+                                            horizontal-alignment: center;
+                                            text: row.is_dir ? (row.has_children ? (row.expanded ? "▾" : "▸") : "·") : " ";
+                                        }
                                     }
                                 }
-                            }
 
-                            CheckBox {
-                                checked: row.checked;
-                                toggled => { root.toggle-check(i); }
-                            }
+                                CheckBox {
+                                    height: parent.height;
+                                    checked: row.checked;
+                                    toggled => { root.toggle-check(i); }
+                                }
 
-                            Text { 
-                                text: row.name;
+                                Text { 
+                                    
+                                    height: parent.height;
+                                    vertical-alignment: center;
+                                    text: row.name;
+                                }
                             }
                         }
                     }
@@ -197,16 +244,22 @@ export component AppWindow inherits Window {
                     border-color: Palette.border;
                     background: Palette.alternate-background.darker(0.06); 
 
-                    // virtualized, smooth scrolling
-                    ListView {
-                        for line[i] in root.output-lines : Text {
-                            text: line;
-                            wrap: no-wrap;        // set to no-wrap for even faster scroll
-                            width: parent.width;    // wrap to pane width
-                            font-size: 11px;
-                        }
+                    TextEdit {
+                        text <=> root.output-text;
+                        read-only: true;
+                        wrap: no-wrap;
+
+                        // Make it actually fill the bordered rectangle:
+                        x: 0; y: 0;
+                        width: parent.width;
+                        height: parent.height;
+                        has-focus: false;
+                        // Readability
+                        font-size: 11px;
+
                     }
                 }
+            
             }
 
         }
