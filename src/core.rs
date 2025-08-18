@@ -192,12 +192,16 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
                     if slice.starts_with(b"\"\"\"") {
                         state = State::TripleDq;
                         // fast-skip 3 bytes
-                        for _ in 0..2 { iter.next(); } // we've already consumed one; skip 2 more
+                        for _ in 0..2 {
+                            iter.next();
+                        } // we've already consumed one; skip 2 more
                         prev_was_ws = false;
                         continue;
                     } else if slice.starts_with(b"'''") {
                         state = State::TripleSq;
-                        for _ in 0..2 { iter.next(); }
+                        for _ in 0..2 {
+                            iter.next();
+                        }
                         prev_was_ws = false;
                         continue;
                     }
@@ -297,7 +301,9 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
                 State::TripleDq => {
                     if slice.starts_with(b"\"\"\"") {
                         state = State::Normal;
-                        for _ in 0..2 { iter.next(); }
+                        for _ in 0..2 {
+                            iter.next();
+                        }
                         prev_was_ws = false;
                         continue;
                     }
@@ -307,7 +313,9 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
                 State::TripleSq => {
                     if slice.starts_with(b"'''") {
                         state = State::Normal;
-                        for _ in 0..2 { iter.next(); }
+                        for _ in 0..2 {
+                            iter.next();
+                        }
                         prev_was_ws = false;
                         continue;
                     }
@@ -418,7 +426,6 @@ pub fn collapse_consecutive_blank_lines(s: &str) -> String {
     out
 }
 
-
 /* =========================== Filesystem & paths ============================ */
 
 pub fn path_to_unix(p: &Path) -> String {
@@ -431,7 +438,6 @@ pub fn path_to_unix(p: &Path) -> String {
     }
     s
 }
-
 
 pub fn is_ancestor_of(ancestor: &Path, p: &Path) -> bool {
     let anc = normalize_path(ancestor);
@@ -513,7 +519,11 @@ pub fn scan_dir_to_node(
                     let mut out = String::with_capacity(s.len() + 1);
                     out.push('.');
                     for b in s.bytes() {
-                        let lb = if (b'A'..=b'Z').contains(&b) { b + 32 } else { b };
+                        let lb = if (b'A'..=b'Z').contains(&b) {
+                            b + 32
+                        } else {
+                            b
+                        };
                         out.push(lb as char);
                     }
                     out
@@ -613,7 +623,13 @@ pub fn scan_dir_to_node(
 
     // Then recurse into directories.
     for (_basename, path) in dirs {
-        let child = scan_dir_to_node(&path, include_exts, exclude_exts, exclude_dirs, exclude_files);
+        let child = scan_dir_to_node(
+            &path,
+            include_exts,
+            exclude_exts,
+            exclude_dirs,
+            exclude_files,
+        );
 
         // Hide empty dirs when include-mode is active (preserves existing behavior).
         let child_visible = if include_mode {
@@ -678,4 +694,3 @@ pub fn collect_selected_paths(
         files_out.push(node.path.clone());
     }
 }
-
