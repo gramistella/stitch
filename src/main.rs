@@ -39,7 +39,7 @@ const UI_OUTPUT_CHAR_LIMIT: usize = 50_000;
 use std::sync::OnceLock;
 
 #[cfg(all(feature = "ui", feature = "tokens"))]
-use tiktoken_rs::{o200k_base, CoreBPE};
+use tiktoken_rs::{CoreBPE, o200k_base};
 
 #[cfg(feature = "ui")]
 #[derive(Default)]
@@ -356,18 +356,18 @@ fn on_generate_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let mut rels = Vec::new();
         if want_dirs_only {
             for d in &dirs {
-                if let Ok(r) = d.strip_prefix(selected_dir) {
-                    if !r.as_os_str().is_empty() {
-                        rels.push(path_to_unix(r));
-                    }
+                if let Ok(r) = d.strip_prefix(selected_dir)
+                    && !r.as_os_str().is_empty()
+                {
+                    rels.push(path_to_unix(r));
                 }
             }
         } else {
             for f in &files {
-                if let Ok(r) = f.strip_prefix(selected_dir) {
-                    if !r.as_os_str().is_empty() {
-                        rels.push(path_to_unix(r));
-                    }
+                if let Ok(r) = f.strip_prefix(selected_dir)
+                    && !r.as_os_str().is_empty()
+                {
+                    rels.push(path_to_unix(r));
                 }
             }
         }
@@ -695,8 +695,8 @@ fn set_output(app: &AppWindow, state: &Rc<RefCell<AppState>>, s: &str) {
 
     // Count characters & tokens on the FULL output (not the truncated view)
     let total_chars = normalized.chars().count();
-    let total_tokens = count_tokens(&normalized);            
-    app.set_output_stats(format!("{} chars • {} tokens", total_chars, total_tokens).into()); 
+    let total_tokens = count_tokens(&normalized);
+    app.set_output_stats(format!("{} chars • {} tokens", total_chars, total_tokens).into());
 
     // Build the displayed string (≤ limit) and add a concise footer if truncated
     let displayed: String = if total_chars <= UI_OUTPUT_CHAR_LIMIT {
