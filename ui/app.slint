@@ -57,6 +57,7 @@ export component SelectFromTextDialog inherits Window {
     }
 }
 
+// In `ui/app.slint`, update the `AppWindow` component (complete component)
 export component AppWindow inherits Window {
     width: 1300px;
     height: 650px;
@@ -80,7 +81,6 @@ export component AppWindow inherits Window {
     in-out property <[string]> output-lines;
     in-out property <string> output-stats;
 
-
     in-out property <bool> show-copy-toast;
     in-out property <string> copy-toast-text;
     
@@ -91,37 +91,40 @@ export component AppWindow inherits Window {
     callback generate-output();
     callback copy-output();
     callback select-from-text();
-
+    callback new-window(); // NEW
 
     VerticalBox {
         spacing: 10px;
 
-        // Header row
         HorizontalBox {
             spacing: 8px;
 
             Rectangle { 
                 horizontal-stretch: 1;
-                width: 360px;
+                width: 180px;
                 Button {
                     horizontal-stretch: 1;
                     text: "Select Folder";
                     
-                    width: parent.width / 2;
+                    width: 110px;
                     height: 30px;
                     clicked => { root.select-folder(); }
                 }
             }
-            Rectangle { horizontal-stretch: 1; background: transparent; } // spacer
 
-            // Keep the checkboxes a consistent height so focus/hover doesn't change height
+            Button {
+                text: "New Window";
+                clicked => { root.new-window(); }
+            }
+
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+
             CheckBox { text: "Hierarchy Only";  checked <=> root.hierarchy-only;  height: 30px; width: 150px;  horizontal-stretch: 1;}
             CheckBox { text: "Directories Only"; checked <=> root.dirs-only;      height: 30px; width: 160px;  horizontal-stretch: 1; }
 
-            // <-- Reserve space for the timestamp so it won't push things around
             Rectangle {
                 horizontal-stretch: 1;
-                width: 290px;   // pick a width that fits your longest string
+                width: 290px;
                 height: 30px;
                 background: transparent;
                 Text {
@@ -130,7 +133,7 @@ export component AppWindow inherits Window {
                     text: root.last-refresh;
                     horizontal-alignment: right;
                     vertical-alignment: center;
-                    overflow: elide; // if it gets too long, don't expand the row
+                    overflow: elide;
                 }
             }
 
@@ -144,6 +147,8 @@ export component AppWindow inherits Window {
                 clicked => { root.copy-output(); }
             }
 
+            
+
             Text {
                 visible: root.show-copy-toast;
                 text: root.copy-toast-text;
@@ -152,12 +157,9 @@ export component AppWindow inherits Window {
             }
         }
 
-
-        // Main 3-column content
         HorizontalBox {
             spacing: 12px;
 
-            // LEFT PANE — inputs
             VerticalBox {
                 width: 360px;
             
@@ -205,7 +207,7 @@ export component AppWindow inherits Window {
                     border-width: 1px;
                     border-radius: 4px;
                     border-color: Palette.border;
-                    background: Palette.alternate-background.darker(0.06);  // slightly darker than UI
+                    background: Palette.alternate-background.darker(0.06);
                     ScrollView {
                         viewport1 := VerticalBox {
                             spacing: 0px;
@@ -249,8 +251,6 @@ export component AppWindow inherits Window {
                 }
             }
 
-
-            // RIGHT PANE — output
             VerticalBox {
                 padding-top: 24px;
                 spacing: 6px;
@@ -272,12 +272,10 @@ export component AppWindow inherits Window {
                         read-only: true;
                         wrap: no-wrap;
 
-                        // Make it actually fill the bordered rectangle:
                         x: 0; y: 0;
                         width: parent.width;
                         height: parent.height;
                         has-focus: false;
-                        // Readability
                         font-size: 11px;
 
                     }

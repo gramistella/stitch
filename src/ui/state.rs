@@ -29,6 +29,7 @@ pub struct AppState {
     pub fs_event_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
     pub fs_pump_timer: slint::Timer,
     pub full_output_text: String,
+    pub poll_timer: slint::Timer, // NEW: keep per-window periodic update timer alive
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;
