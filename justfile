@@ -11,7 +11,7 @@ bin-release:
 	  rustup target add "$TARGET" || true
 	  cargo build --release --features ui --target "$TARGET"
 	else
-	  cargo build --release --features ui
+	  cargo build --release --features ui,tokens
 	fi
 
 # macOS: build .app and .dmg

@@ -76,4 +76,4 @@ jobs:
 
       # Ensure UI compilation path keeps working on all OSes
       - name: Build (ui feature)
-        run: cargo build --features ui --verbose
+        run: cargo build --features ui,tokens --verbose

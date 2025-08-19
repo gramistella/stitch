@@ -40,7 +40,7 @@ jobs:
 
       # Make sure the UI build path still compiles
       - name: Compile check (ui feature)
-        run: cargo build --release --features ui
+        run: cargo build --release --features ui,tokens
 
   # 2) Only if tests succeed, build & publish artifacts per-OS
   release:

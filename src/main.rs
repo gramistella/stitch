@@ -35,6 +35,12 @@ use stitch::core::{
 #[cfg(feature = "ui")]
 const UI_OUTPUT_CHAR_LIMIT: usize = 50_000;
 
+#[cfg(all(feature = "ui", feature = "tokens"))]
+use std::sync::OnceLock;
+
+#[cfg(all(feature = "ui", feature = "tokens"))]
+use tiktoken_rs::{o200k_base, CoreBPE};
+
 #[cfg(feature = "ui")]
 #[derive(Default)]
 struct AppState {
@@ -77,6 +83,7 @@ fn main() -> anyhow::Result<()> {
     app.set_output_text("".into());
     app.set_show_copy_toast(false);
     app.set_copy_toast_text("".into());
+    app.set_output_stats("0 chars • 0 tokens".into());
 
     let state = Rc::new(RefCell::new(AppState {
         poll_interval_ms: 45_000,
@@ -238,7 +245,7 @@ fn apply_selection_from_text(app: &AppWindow, state: &Rc<RefCell<AppState>>, tex
             for c in &node.children {
                 walk_and_mark(c, project_root, wanted, explicit);
             }
-        } else if let Some(rel) = pathdiff::diff_paths(&node.path, project_root) {
+        } else if let Ok(rel) = node.path.strip_prefix(project_root) {
             let key = rel
                 .iter()
                 .map(|c| c.to_string_lossy())
@@ -349,18 +356,18 @@ fn on_generate_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let mut rels = Vec::new();
         if want_dirs_only {
             for d in &dirs {
-                if let Some(r) = pathdiff::diff_paths(d, selected_dir)
-                    && r != PathBuf::from("")
-                {
-                    rels.push(path_to_unix(&r));
+                if let Ok(r) = d.strip_prefix(selected_dir) {
+                    if !r.as_os_str().is_empty() {
+                        rels.push(path_to_unix(r));
+                    }
                 }
             }
         } else {
             for f in &files {
-                if let Some(r) = pathdiff::diff_paths(f, selected_dir)
-                    && r != PathBuf::from("")
-                {
-                    rels.push(path_to_unix(&r));
+                if let Ok(r) = f.strip_prefix(selected_dir) {
+                    if !r.as_os_str().is_empty() {
+                        rels.push(path_to_unix(r));
+                    }
                 }
             }
         }
@@ -417,8 +424,10 @@ fn on_generate_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         let s_dir = { state.borrow().selected_directory.clone().unwrap() };
 
         for fp in selected_files {
-            let rel = pathdiff::diff_paths(&fp, &s_dir)
-                .unwrap_or_else(|| PathBuf::from(fp.file_name().unwrap_or_default()));
+            let rel: PathBuf = fp
+                .strip_prefix(&s_dir)
+                .map(|p| p.to_path_buf())
+                .unwrap_or_else(|_| PathBuf::from(fp.file_name().unwrap_or_default()));
 
             let mut contents = match fs::read_to_string(&fp) {
                 Ok(c) => c,
@@ -684,14 +693,18 @@ fn set_output(app: &AppWindow, state: &Rc<RefCell<AppState>>, s: &str) {
         st.full_output_text = normalized.clone();
     }
 
+    // Count characters & tokens on the FULL output (not the truncated view)
     let total_chars = normalized.chars().count();
+    let total_tokens = count_tokens(&normalized);            
+    app.set_output_stats(format!("{} chars • {} tokens", total_chars, total_tokens).into()); 
 
     // Build the displayed string (≤ limit) and add a concise footer if truncated
     let displayed: String = if total_chars <= UI_OUTPUT_CHAR_LIMIT {
         normalized.clone()
     } else {
+        // Using a couple more /n than necessary because I couldn't get padding to work in the UI
         let footer = format!(
-            "\n… [truncated: showing {} of {} chars — use “Copy Output” to copy all]\n",
+            "\n… [truncated: showing {} of {} chars — use “Copy Output” to copy all]\n\n\n",
             UI_OUTPUT_CHAR_LIMIT, total_chars
         );
         // Ensure we stay within the hard UI limit, including the footer itself
@@ -831,4 +844,17 @@ fn start_fs_watcher(app: &AppWindow, state: &Rc<RefCell<AppState>>) -> notify::R
     }
 
     Ok(())
+}
+
+#[cfg(all(feature = "ui", feature = "tokens"))]
+fn count_tokens(text: &str) -> usize {
+    // Build once, reuse forever
+    static BPE: OnceLock<CoreBPE> = OnceLock::new();
+    let bpe = BPE.get_or_init(|| o200k_base().expect("failed to load o200k_base BPE"));
+    bpe.encode_with_special_tokens(text).len()
+}
+
+#[cfg(all(feature = "ui", not(feature = "tokens")))]
+fn count_tokens(text: &str) -> usize {
+    text.split_whitespace().filter(|s| !s.is_empty()).count()
 }

@@ -78,7 +78,7 @@ export component AppWindow inherits Window {
     in-out property <string> last-refresh;
     in-out property <string> output-text;
     in-out property <[string]> output-lines;
-
+    in-out property <string> output-stats;
 
 
     in-out property <bool> show-copy-toast;
@@ -235,9 +235,10 @@ export component AppWindow inherits Window {
 
             // RIGHT PANE — output
             VerticalBox {
+                padding-top: 24px;
                 spacing: 6px;
                 horizontal-stretch: 2;
-                Text { text: "Output:"; }
+                Text { text: "Output: " + root.output-stats; }
 
                 Rectangle {
                     border-width: 1px;
@@ -247,7 +248,7 @@ export component AppWindow inherits Window {
                     vertical-stretch: 1;
                     border-color: Palette.border;
                     background: Palette.alternate-background.darker(0.06); 
-                    
+
                     TextEdit {
                         text <=> root.output-text;
                         

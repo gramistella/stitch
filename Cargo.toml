@@ -8,19 +8,21 @@ readme = "README.md"
 repository = "https://github.com/gramistella/stitch"
 
 [features]
-default = ["ui"]
+default = ["ui", "tokens"]
 ui = ["dep:slint", "dep:rfd", "dep:arboard"] 
+tokens = ["dep:tiktoken-rs"] 
 
 [dependencies]
 # Make the UI deps optional so they’re not pulled in for headless/test builds
 slint   = { version = "1", optional = true }
 rfd     = { version = "0.14", optional = true }
 arboard = { version = "3", optional = true }
+tiktoken-rs = { version = "0.7", optional = true } 
 
 regex = "1"
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-pathdiff = "0.2"
+#pathdiff = "0.2"
 serde_json = "1"
 dunce = "1"
 notify = "6"
