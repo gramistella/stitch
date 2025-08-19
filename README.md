@@ -43,10 +43,12 @@ Stitch is a lightweight desktop utility that lets you **select a precise slice o
 ## 🚀 Getting Started
 
 ### Prerequisites
+
 - **Rust** (latest stable toolchain) and **Cargo**
 - macOS users (optional for DMG): `cargo-bundle` (installed automatically by the `just dmg` recipe)
 
 ### Run in dev
+
 ```bash
 cargo run
 
@@ -67,13 +69,18 @@ just dmg
 # Produces: dist/Stitch-<version>.dmg
 ```
 
-> macOS note: If, after installing, you see the error “Stitch” is damaged and can’t be opened. You should eject the disk image., clear the quarantine attributes:
-
-```bash
-xattr -cr /Applications/Stitch.app
-```
-
-This removes the quarantine flag so the app can launch.
+> macOS note: If, after installing, you see the error
+>
+>“Stitch” is damaged and can’t be opened.
+> You should eject the disk image."
+>
+>Clear the quarantine attributes:
+>
+>```bash
+>xattr -cr /Applications/Stitch.app
+>```
+>
+>This removes the quarantine flag so the app can launch.
 
 ---
 

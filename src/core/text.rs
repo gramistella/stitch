@@ -1,22 +1,5 @@
-#![allow(clippy::needless_return)]
-
 use regex::Regex;
-use std::{
-    collections::{BTreeMap, HashMap, HashSet},
-    fs,
-    path::{Path, PathBuf},
-};
-
-/// UI-free representation of a filesystem node.
-#[derive(Clone, Debug)]
-pub struct Node {
-    pub name: String,
-    pub path: PathBuf,
-    pub is_dir: bool,
-    pub children: Vec<Node>,
-    pub expanded: bool,
-    pub has_children: bool,
-}
+use std::collections::{BTreeMap, HashSet};
 
 /* =========================== Parsing & Text utils =========================== */
 
@@ -33,7 +16,6 @@ pub fn parse_hierarchy_text(text: &str) -> Option<HashSet<String>> {
             continue;
         }
 
-        // Find name start once, tracking both char index and byte index.
         let mut name_char_idx: Option<usize> = None;
         let mut name_byte_idx: usize = 0;
         let mut byte_pos: usize = 0;
@@ -134,7 +116,6 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
         return contents.to_string();
     }
 
-    // Precompute non-empty prefixes as byte slices and group by first byte for O(1) dispatch.
     let mut by_first: [Vec<&[u8]>; 256] = std::array::from_fn(|_| Vec::new());
     for p in prefixes.iter().filter(|p| !p.is_empty()) {
         let b = p.as_bytes();
@@ -143,7 +124,6 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
 
     let mut out = String::with_capacity(contents.len());
 
-    // ===== NEW: carry string/comment state across lines =====
     #[derive(Copy, Clone, Debug, PartialEq, Eq)]
     enum State {
         Normal,
@@ -207,19 +187,15 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
                         continue;
                     }
 
-                    // Raw string opener: r####"
                     if ch == 'r' {
-                        // Count '#' after 'r'
-                        let mut j = next_pos; // byte index after 'r'
+                        let mut j = next_pos;
                         let mut hashes = 0usize;
                         while j < len && bytes[j] == b'#' {
                             hashes += 1;
-                            // advance iterator to align with 'j'
                             let _ = iter.next_if(|(idx, _)| *idx == j);
                             j += 1;
                         }
                         if j < len && bytes[j] == b'"' {
-                            // consume the '"' (advance iterator to j)
                             let _ = iter.next_if(|(idx, _)| *idx == j);
                             state = State::Raw { hashes };
                             prev_was_ws = false;
@@ -227,7 +203,6 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
                         }
                     }
 
-                    // Normal string openers
                     if ch == '"' {
                         state = State::Dq { escaped: false };
                         prev_was_ws = false;
@@ -238,9 +213,6 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
                         continue;
                     }
 
-                    // Inline comment detection (only in Normal):
-                    //  - only after the first non-ws
-                    //  - require immediate whitespace before prefix
                     if pos >= first_non_ws && prev_was_ws {
                         let b0 = bytes[pos];
                         let bucket = &by_first[b0 as usize];
@@ -283,12 +255,10 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
                 }
 
                 State::Raw { hashes } => {
-                    // Close when we see '"' followed by exactly `hashes` '#'
                     if bytes[pos] == b'"' {
                         let end = pos + 1 + hashes;
                         if end <= len && bytes[pos + 1..end].iter().all(|&b| b == b'#') {
                             state = State::Normal;
-                            // advance iterator to end-1 (end is next start)
                             while iter.peek().is_some_and(|(i, _)| *i < end) {
                                 iter.next();
                             }
@@ -325,7 +295,6 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
             }
         }
 
-        // Emit the line (possibly trimmed up to cut_at), trimming only ASCII space/tab before the prefix.
         if let Some(mut end) = cut_at {
             while end > 0 {
                 let b = bytes[end - 1];
@@ -391,10 +360,9 @@ pub fn parse_extension_filters(
             (false, tok)
         };
 
-        // Allow tokens with or without leading dot(s). Ignore if they’re only dot(s) or empty.
         let stripped = rest.trim_start_matches('.');
         if stripped.is_empty() {
-            continue; // skip ".", "-.", "...", etc.
+            continue;
         }
 
         let norm = format!(".{}", stripped.to_lowercase());
@@ -422,280 +390,7 @@ pub fn collapse_consecutive_blank_lines(s: &str) -> String {
         prev_blank = is_blank;
     }
     if !s.ends_with('\n') && out.ends_with('\n') {
-        out.pop(); // remove trailing newline if input had none
+        out.pop();
     }
     out
-}
-
-/* =========================== Filesystem & paths ============================ */
-
-pub fn path_to_unix(p: &Path) -> String {
-    let mut s = String::new();
-    for (i, comp) in p.iter().enumerate() {
-        if i > 0 {
-            s.push('/');
-        }
-        s.push_str(&comp.to_string_lossy());
-    }
-    s
-}
-
-pub fn is_ancestor_of(ancestor: &Path, p: &Path) -> bool {
-    let anc = normalize_path(ancestor);
-    let pp = normalize_path(p);
-    pp.starts_with(&anc)
-}
-
-pub fn normalize_path(p: &Path) -> PathBuf {
-    // 1) Fast path: fully canonicalizable
-    if let Ok(c) = dunce::canonicalize(p) {
-        return c;
-    }
-
-    // 2) Build an absolute version to anchor comparisons to the same base dir
-    let cwd = std::env::current_dir()
-        .ok()
-        .and_then(|cd| dunce::canonicalize(cd).ok())
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let abs = if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        cwd.join(p)
-    };
-
-    // 3) Peel off tail components until we reach an existing ancestor
-    let mut cur = abs.as_path();
-    let mut tail: Vec<std::ffi::OsString> = Vec::new();
-    while !cur.exists() {
-        match (cur.parent(), cur.file_name()) {
-            (Some(parent), Some(name)) => {
-                tail.push(name.to_os_string());
-                cur = parent;
-            }
-            _ => break, // hit root or nothing exists
-        }
-    }
-
-    // 4) Canonicalize the existing base to resolve symlinks (/var ↔ /private/var)
-    let mut base = if cur.exists() {
-        dunce::canonicalize(cur).unwrap_or_else(|_| cur.to_path_buf())
-    } else {
-        // For absolute paths, this should rarely happen; fall back to abs
-        abs.clone()
-    };
-
-    // 5) Reattach the (non-existent) tail in the right order
-    for c in tail.iter().rev() {
-        base.push(c);
-    }
-
-    // 6) Lexically normalize '.' and '..'
-    use std::path::Component;
-    let mut cleaned = PathBuf::new();
-    for comp in base.components() {
-        match comp {
-            Component::CurDir => {}
-            Component::ParentDir => {
-                let _ = cleaned.pop();
-            }
-            _ => cleaned.push(comp.as_os_str()),
-        }
-    }
-    cleaned
-}
-
-pub fn scan_dir_to_node(
-    dir: &Path,
-    include_exts: &HashSet<String>,
-    exclude_exts: &HashSet<String>,
-    exclude_dirs: &HashSet<String>,
-    exclude_files: &HashSet<String>,
-) -> Node {
-    #[inline]
-    fn dot_lower_last_ext(p: &Path) -> String {
-        match p.extension() {
-            Some(os) => {
-                if let Some(s) = os.to_str() {
-                    // ASCII-fast path, avoids Unicode-lowering allocs for common cases.
-                    let mut out = String::with_capacity(s.len() + 1);
-                    out.push('.');
-                    for b in s.bytes() {
-                        let lb = if b.is_ascii_uppercase() { b + 32 } else { b };
-                        out.push(lb as char);
-                    }
-                    out
-                } else {
-                    // Fallback for non-UTF8: use lossy + lowercase to keep semantics.
-                    let lossy = os.to_string_lossy();
-                    let lower = lossy.to_lowercase();
-                    let mut out = String::with_capacity(lower.len() + 1);
-                    out.push('.');
-                    out.push_str(&lower);
-                    out
-                }
-            }
-            None => String::new(),
-        }
-    }
-
-    let name = dir
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .to_string();
-
-    let mut node = Node {
-        name,
-        path: dir.to_path_buf(),
-        is_dir: true,
-        children: Vec::new(),
-        expanded: true,
-        has_children: false,
-    };
-
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return node,
-    };
-
-    // Keep basenames with paths so we don't recompute names later.
-    let mut dirs: Vec<(String, PathBuf)> = Vec::new();
-    let mut files: Vec<(String, PathBuf)> = Vec::new();
-
-    let include_mode = !include_exts.is_empty();
-    let exclude_mode = !exclude_exts.is_empty();
-
-    for ent in entries.flatten() {
-        let path = ent.path();
-        let base: String = ent.file_name().to_string_lossy().into_owned();
-
-        let is_dir = ent.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
-        if is_dir {
-            if exclude_dirs.contains(&base) {
-                continue;
-            }
-            dirs.push((base, path));
-            continue;
-        }
-
-        if exclude_files.contains(&base) {
-            continue;
-        }
-
-        // Only compute/normalize extension when we actually need it.
-        let matches_file = if include_mode || exclude_mode {
-            let ext = dot_lower_last_ext(&path);
-            if include_mode {
-                include_exts.contains(&ext)
-            } else {
-                !exclude_exts.contains(&ext)
-            }
-        } else {
-            true
-        };
-
-        if matches_file {
-            files.push((base, path));
-        }
-    }
-
-    // Per-directory deterministic ordering: files by name, then dirs by name.
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-    dirs.sort_by(|a, b| a.0.cmp(&b.0));
-
-    node.children.reserve(files.len() + dirs.len());
-
-    // Emit files first.
-    for (basename, path) in files {
-        node.has_children = true;
-        node.children.push(Node {
-            name: basename,
-            path,
-            is_dir: false,
-            children: Vec::new(),
-            expanded: false,
-            has_children: false,
-        });
-    }
-
-    // Then recurse into directories.
-    for (_basename, path) in dirs {
-        let child = scan_dir_to_node(
-            &path,
-            include_exts,
-            exclude_exts,
-            exclude_dirs,
-            exclude_files,
-        );
-
-        // Hide empty dirs when include-mode is active (preserves existing behavior).
-        let child_visible = if include_mode {
-            !child.children.is_empty() || child.has_children
-        } else {
-            true
-        };
-
-        if child_visible {
-            node.has_children =
-                node.has_children || !child.children.is_empty() || child.has_children;
-            node.children.push(child);
-        }
-    }
-
-    node
-}
-
-pub fn gather_paths_set(root: &Node) -> HashSet<PathBuf> {
-    let mut set = HashSet::new();
-    fn rec(n: &Node, set: &mut HashSet<PathBuf>) {
-        set.insert(n.path.clone());
-        for c in &n.children {
-            rec(c, set);
-        }
-    }
-    rec(root, &mut set);
-    set
-}
-
-pub fn dir_contains_file(node: &Node) -> bool {
-    // Fast path using the flag computed in `scan_dir_to_node`.
-    !node.is_dir || node.has_children
-}
-
-// src/core.rs
-
-pub fn collect_selected_paths(
-    node: &Node,
-    explicit: &HashMap<PathBuf, bool>,
-    inherited: Option<bool>,
-    files_out: &mut Vec<PathBuf>,
-    dirs_out: &mut Vec<PathBuf>,
-) {
-    // Effective selection at this node (explicit overrides inherited).
-    let my_effective = explicit
-        .get(&node.path)
-        .copied()
-        .or(inherited)
-        .unwrap_or(false);
-
-    if node.is_dir {
-        // Use the precomputed flag instead of rescanning the subtree.
-        if my_effective && node.has_children {
-            dirs_out.push(node.path.clone());
-        }
-        let next_inherited = my_effective;
-        for c in &node.children {
-            collect_selected_paths(c, explicit, Some(next_inherited), files_out, dirs_out);
-        }
-    } else if my_effective {
-        files_out.push(node.path.clone());
-    }
-}
-
-pub fn drain_channel_nonblocking<T>(rx: &std::sync::mpsc::Receiver<T>) -> bool {
-    let mut any = false;
-    while rx.try_recv().is_ok() {
-        any = true;
-    }
-    any
 }
