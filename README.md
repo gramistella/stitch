@@ -67,6 +67,14 @@ just dmg
 # Produces: dist/Stitch-<version>.dmg
 ```
 
+> macOS note: If, after installing, you see the error “Stitch” is damaged and can’t be opened. You should eject the disk image., clear the quarantine attributes:
+
+```bash
+xattr -cr /Applications/Stitch.app
+```
+
+This removes the quarantine flag so the app can launch.
+
 ---
 
 ## 🖱️ How to Use
