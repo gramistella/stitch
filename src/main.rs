@@ -326,13 +326,20 @@ fn on_generate_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
     let want_dirs_only = app.get_dirs_only();
     let hierarchy_only = app.get_hierarchy_only();
 
+    // --- DROP ANY BORROW BEFORE CALLING set_output ---
+    let no_folder_selected = {
+        let s = state.borrow();
+        s.selected_directory.is_none() || s.root_node.is_none()
+    };
+    if no_folder_selected {
+        set_output(app, state, "No folder selected.\n");
+        update_last_refresh(app);
+        return;
+    }
+
+    // Compute selections without calling set_output inside a borrow
     let (selected_files, selected_dirs, relative_paths) = {
         let s = state.borrow();
-        if s.selected_directory.is_none() || s.root_node.is_none() {
-            set_output(app, state, "No folder selected.\n");
-            update_last_refresh(app);
-            return;
-        }
         let root = s.root_node.as_ref().unwrap();
         let mut files = Vec::new();
         let mut dirs = Vec::new();
@@ -363,6 +370,7 @@ fn on_generate_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
     if (!want_dirs_only && selected_files.is_empty())
         || (want_dirs_only && selected_dirs.is_empty())
     {
+        // No active borrow here, so this is safe
         set_output(app, state, "No items selected.\n");
         update_last_refresh(app);
         return;
@@ -403,12 +411,10 @@ fn on_generate_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
 
         let (remove_prefixes, remove_regex_opt) = {
             let s = state.borrow();
-            let rp = s.remove_prefixes.clone();
-            let rr = s.remove_regex.clone();
-            (rp, rr)
+            (s.remove_prefixes.clone(), s.remove_regex.clone())
         };
 
-        let s_dir = state.borrow().selected_directory.clone().unwrap();
+        let s_dir = { state.borrow().selected_directory.clone().unwrap() };
 
         for fp in selected_files {
             let rel = pathdiff::diff_paths(&fp, &s_dir)
@@ -439,6 +445,7 @@ fn on_generate_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         }
     }
 
+    // No active borrow here either
     set_output(app, state, &out);
     update_last_refresh(app);
 }
