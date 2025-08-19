@@ -33,6 +33,9 @@ use stitch::core::{
 };
 
 #[cfg(feature = "ui")]
+const UI_OUTPUT_CHAR_LIMIT: usize = 10_000;
+
+#[cfg(feature = "ui")]
 #[derive(Default)]
 struct AppState {
     selected_directory: Option<PathBuf>,
@@ -54,6 +57,7 @@ struct AppState {
     watcher: Option<notify::RecommendedWatcher>,
     fs_event_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
     fs_pump_timer: slint::Timer,
+    full_output_text: String,
 }
 
 #[cfg(feature = "ui")]
@@ -325,7 +329,7 @@ fn on_generate_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
     let (selected_files, selected_dirs, relative_paths) = {
         let s = state.borrow();
         if s.selected_directory.is_none() || s.root_node.is_none() {
-            set_output(app, "No folder selected.\n");
+            set_output(app, state, "No folder selected.\n");
             update_last_refresh(app);
             return;
         }
@@ -359,7 +363,7 @@ fn on_generate_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
     if (!want_dirs_only && selected_files.is_empty())
         || (want_dirs_only && selected_dirs.is_empty())
     {
-        set_output(app, "No items selected.\n");
+        set_output(app, state, "No items selected.\n");
         update_last_refresh(app);
         return;
     }
@@ -435,7 +439,7 @@ fn on_generate_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
         }
     }
 
-    set_output(app, &out);
+    set_output(app, state, &out);
     update_last_refresh(app);
 }
 
@@ -663,12 +667,37 @@ fn set_tree_model(app: &AppWindow, rows: Vec<Row>) {
 }
 
 #[cfg(feature = "ui")]
-fn set_output(app: &AppWindow, s: &str) {
+fn set_output(app: &AppWindow, state: &Rc<RefCell<AppState>>, s: &str) {
     let normalized = collapse_consecutive_blank_lines(s);
 
-    app.set_output_text(normalized.clone().into());
+    // store the full output for "Copy Output"
+    {
+        let mut st = state.borrow_mut();
+        st.full_output_text = normalized.clone();
+    }
 
-    let lines: Vec<slint::SharedString> = normalized
+    let total_chars = normalized.chars().count();
+
+    // Build the displayed string (≤ limit) and add a concise footer if truncated
+    let displayed: String = if total_chars <= UI_OUTPUT_CHAR_LIMIT {
+        normalized.clone()
+    } else {
+        let footer = format!(
+            "\n… [truncated: showing {} of {} chars — use “Copy Output” to copy all]\n",
+            UI_OUTPUT_CHAR_LIMIT,
+            total_chars
+        );
+        // Ensure we stay within the hard UI limit, including the footer itself
+        let keep = UI_OUTPUT_CHAR_LIMIT.saturating_sub(footer.chars().count());
+        let mut head: String = normalized.chars().take(keep).collect();
+        head.push_str(&footer);
+        head
+    };
+
+    app.set_output_text(displayed.clone().into());
+
+    // keep the side "lines" panel synced with what’s displayed
+    let lines: Vec<slint::SharedString> = displayed
         .lines()
         .map(|l| l.replace(' ', "\u{00A0}").into())
         .collect();
