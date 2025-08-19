@@ -762,7 +762,6 @@ fn set_output(app: &AppWindow, state: &Rc<RefCell<AppState>>, s: &str) {
     app.set_output_lines(slint::ModelRc::new(model));
 }
 
-
 #[cfg(feature = "ui")]
 fn update_last_refresh(app: &AppWindow) {
     let now_str = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();

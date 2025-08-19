@@ -1,9 +1,8 @@
 // benches/stitch_bench.rs
 use criterion::{
-    black_box, criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput,
+    BatchSize, BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
 };
 use once_cell::sync::Lazy;
-use regex::Regex;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -13,7 +12,7 @@ use walkdir::WalkDir;
 
 use stitch::core::{
     clean_remove_regex, collapse_consecutive_blank_lines, compile_remove_regex_opt,
-    parse_extension_filters, parse_hierarchy_text, path_to_unix, render_unicode_tree_from_paths,
+    parse_extension_filters, parse_hierarchy_text, render_unicode_tree_from_paths,
     scan_dir_to_node, split_prefix_list, strip_lines_and_inline_comments,
 };
 
@@ -24,8 +23,17 @@ static FS_FIXTURE: Lazy<Fixture> = Lazy::new(|| {
 
     // Create directories
     let dirs = &[
-        "src", "src/codec", "src/ui", "tests", "examples", "vendor/dep1", "vendor/dep2",
-        "assets/images", "assets/fonts", "scripts", "src/gen",
+        "src",
+        "src/codec",
+        "src/ui",
+        "tests",
+        "examples",
+        "vendor/dep1",
+        "vendor/dep2",
+        "assets/images",
+        "assets/fonts",
+        "scripts",
+        "src/gen",
     ];
     for d in dirs {
         fs::create_dir_all(root.join(d)).unwrap();
@@ -38,7 +46,10 @@ static FS_FIXTURE: Lazy<Fixture> = Lazy::new(|| {
         ("src/ui/app.rs", "mod ui;"),
         ("tests/core_tests.rs", "/* tests */"),
         ("examples/demo.rs", "// demo"),
-        ("scripts/build.sh", "#!/usr/bin/env bash\n# comment\n echo hi // inline"),
+        (
+            "scripts/build.sh",
+            "#!/usr/bin/env bash\n# comment\n echo hi // inline",
+        ),
         ("assets/fonts/JetBrainsMono-Regular.ttf", ""),
         ("vendor/dep1/lib.c", "int main(){}"),
         ("vendor/dep2/lib.cpp", "int main(){}"),
@@ -61,11 +72,15 @@ static FS_FIXTURE: Lazy<Fixture> = Lazy::new(|| {
         .map(|e| e.path().to_path_buf())
         .collect();
 
-    Fixture { _tmp: tmp, root, all_files }
+    Fixture {
+        _tmp: tmp,
+        root,
+        all_files,
+    }
 });
 
 struct Fixture {
-    _tmp: TempDir,       // keep alive
+    _tmp: TempDir, // keep alive
     root: PathBuf,
     all_files: Vec<PathBuf>,
 }
@@ -104,24 +119,6 @@ fn bench_relative_paths(c: &mut Criterion) {
         });
     });
 
-    // Optional: compare to pathdiff if you enable the feature
-    #[cfg(feature = "bench_pathdiff")]
-    g.bench_function("pathdiff::diff_paths", |b| {
-        b.iter(|| {
-            let mut count = 0usize;
-            for p in fx.all_files.iter() {
-                let rel = pathdiff::diff_paths(p, root).unwrap();
-                let s = rel
-                    .iter()
-                    .map(|c| c.to_string_lossy())
-                    .collect::<Vec<_>>()
-                    .join("/");
-                count = count.wrapping_add(s.len());
-            }
-            black_box(count)
-        });
-    });
-
     g.finish();
 }
 
@@ -133,7 +130,9 @@ fn bench_scan_dir_to_node(c: &mut Criterion) {
     let exclude_dirs: HashSet<String> = ["vendor".into(), "target".into(), "node_modules".into()]
         .into_iter()
         .collect();
-    let exclude_files: HashSet<String> = ["LICENSE".into(), "Cargo.lock".into()].into_iter().collect();
+    let exclude_files: HashSet<String> = ["LICENSE".into(), "Cargo.lock".into()]
+        .into_iter()
+        .collect();
 
     c.bench_function("scan_dir_to_node", |b| {
         b.iter_batched(
@@ -161,7 +160,12 @@ fn bench_render_tree(c: &mut Criterion) {
         .all_files
         .iter()
         .filter_map(|p| p.strip_prefix(root).ok())
-        .map(|r| r.iter().map(|c| c.to_string_lossy()).collect::<Vec<_>>().join("/"))
+        .map(|r| {
+            r.iter()
+                .map(|c| c.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/")
+        })
         .collect();
 
     rels.sort();
@@ -231,7 +235,7 @@ fn bench_remove_regex(c: &mut Criterion) {
 
 fn bench_tokenization(c: &mut Criterion) {
     let snippet = r#"fn main() { println!("hello // not a comment # here"); }"#;
-    let sizes = [256 * 1024, 1 * 1024 * 1024, 3 * 1024 * 1024];
+    let sizes = [256 * 1024, 1024 * 1024, 3 * 1024 * 1024];
     let bpe = tiktoken_rs::o200k_base().expect("load o200k_base");
 
     let mut g = c.benchmark_group("tokenize_o200k_base_with_specials");
@@ -242,12 +246,16 @@ fn bench_tokenization(c: &mut Criterion) {
     for &bytes in &sizes {
         let text = snippet.repeat(bytes / snippet.len().max(1));
         g.throughput(Throughput::Bytes(text.len() as u64));
-        g.bench_with_input(BenchmarkId::from_parameter(format!("{}KB", bytes / 1024)), &text, |b, txt| {
-            b.iter(|| {
-                let tokens = bpe.encode_with_special_tokens(black_box(txt));
-                black_box(tokens.len())
-            });
-        });
+        g.bench_with_input(
+            BenchmarkId::from_parameter(format!("{}KB", bytes / 1024)),
+            &text,
+            |b, txt| {
+                b.iter(|| {
+                    let tokens = bpe.encode_with_special_tokens(black_box(txt));
+                    black_box(tokens.len())
+                });
+            },
+        );
     }
 
     g.finish();
@@ -274,7 +282,8 @@ fn bench_hierarchy_parse_render(c: &mut Criterion) {
     // Also test extension filter parsing (fast path sanity)
     g.bench_function("parse_extension_filters", |b| {
         b.iter(|| {
-            let (_inc, _exc) = parse_extension_filters(black_box(".rs, .md, -.lock, -png, js, -.tmp"));
+            let (_inc, _exc) =
+                parse_extension_filters(black_box(".rs, .md, -.lock, -png, js, -.tmp"));
         })
     });
 
