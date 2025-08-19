@@ -684,8 +684,7 @@ fn set_output(app: &AppWindow, state: &Rc<RefCell<AppState>>, s: &str) {
     } else {
         let footer = format!(
             "\n… [truncated: showing {} of {} chars — use “Copy Output” to copy all]\n",
-            UI_OUTPUT_CHAR_LIMIT,
-            total_chars
+            UI_OUTPUT_CHAR_LIMIT, total_chars
         );
         // Ensure we stay within the hard UI limit, including the footer itself
         let keep = UI_OUTPUT_CHAR_LIMIT.saturating_sub(footer.chars().count());
