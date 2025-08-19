@@ -33,7 +33,7 @@ use stitch::core::{
 };
 
 #[cfg(feature = "ui")]
-const UI_OUTPUT_CHAR_LIMIT: usize = 10_000;
+const UI_OUTPUT_CHAR_LIMIT: usize = 50_000;
 
 #[cfg(feature = "ui")]
 #[derive(Default)]
@@ -452,7 +452,8 @@ fn on_generate_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
 
 #[cfg(feature = "ui")]
 fn on_copy_output(app: &AppWindow, state: &Rc<RefCell<AppState>>) {
-    let text = app.get_output_text().to_string();
+    let text = { state.borrow().full_output_text.clone() };
+
     if text.is_empty() {
         app.set_copy_toast_text("Nothing to copy".into());
         app.set_show_copy_toast(true);
