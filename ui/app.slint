@@ -92,6 +92,7 @@ export component AppWindow inherits Window {
     callback copy-output();
     callback select-from-text();
 
+
     VerticalBox {
         spacing: 10px;
 
@@ -99,22 +100,39 @@ export component AppWindow inherits Window {
         HorizontalBox {
             spacing: 8px;
 
-            Button {
-                text: "Select Folder";
-                clicked => { root.select-folder(); }
-            }
-
-            // right-aligned cluster
-            Rectangle { // flexible spacer
+            Rectangle { 
                 horizontal-stretch: 1;
-                background: transparent;
+                width: 360px;
+                Button {
+                    horizontal-stretch: 1;
+                    text: "Select Folder";
+                    
+                    width: parent.width / 2;
+                    height: 30px;
+                    clicked => { root.select-folder(); }
+                }
             }
+            Rectangle { horizontal-stretch: 1; background: transparent; } // spacer
 
-            CheckBox { text: "Hierarchy Only"; checked <=> root.hierarchy-only; }
-            CheckBox { text: "Directories Only"; checked <=> root.dirs-only; }
+            // Keep the checkboxes a consistent height so focus/hover doesn't change height
+            CheckBox { text: "Hierarchy Only";  checked <=> root.hierarchy-only;  height: 30px; width: 150px;  horizontal-stretch: 1;}
+            CheckBox { text: "Directories Only"; checked <=> root.dirs-only;      height: 30px; width: 160px;  horizontal-stretch: 1; }
 
-            Text { text: root.last-refresh; }
-            
+            // <-- Reserve space for the timestamp so it won't push things around
+            Rectangle {
+                horizontal-stretch: 1;
+                width: 290px;   // pick a width that fits your longest string
+                height: 30px;
+                background: transparent;
+                Text {
+                    width: parent.width;
+                    height: parent.height;
+                    text: root.last-refresh;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                    overflow: elide; // if it gets too long, don't expand the row
+                }
+            }
 
             Button {
                 text: "Generate Output";
@@ -126,16 +144,14 @@ export component AppWindow inherits Window {
                 clicked => { root.copy-output(); }
             }
 
-            // Tiny toast/feedback label
             Text {
                 visible: root.show-copy-toast;
                 text: root.copy-toast-text;
                 color: #2b8a3e;
                 font-weight: 10;
             }
-
-
         }
+
 
         // Main 3-column content
         HorizontalBox {

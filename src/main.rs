@@ -685,38 +685,74 @@ fn set_tree_model(app: &AppWindow, rows: Vec<Row>) {
 
 #[cfg(feature = "ui")]
 fn set_output(app: &AppWindow, state: &Rc<RefCell<AppState>>, s: &str) {
+    // Normalize text (collapse 3+ blank lines into 2, preserve trailing newline behavior)
     let normalized = collapse_consecutive_blank_lines(s);
 
-    // store the full output for "Copy Output"
+    // Keep the full (untruncated) text in state for "Copy Output"
     {
         let mut st = state.borrow_mut();
         st.full_output_text = normalized.clone();
     }
 
-    // Count characters & tokens on the FULL output (not the truncated view)
+    // Character count is cheap; show it immediately
     let total_chars = normalized.chars().count();
-    let total_tokens = count_tokens(&normalized);
-    app.set_output_stats(format!("{} chars • {} tokens", total_chars, total_tokens).into());
 
-    // Build the displayed string (≤ limit) and add a concise footer if truncated
+    // If tokenization feature is compiled, show a placeholder and compute in background.
+    // Otherwise, compute synchronously via the fallback `count_tokens` (whitespace-based).
+    #[cfg(feature = "tokens")]
+    {
+        // Immediate placeholder so the UI feels responsive
+        app.set_output_stats(format!("{total_chars} chars • … tokens").into());
+
+        // For very large blobs, skip tokenization to keep the UI smooth.
+        const MAX_TOKENIZE_BYTES: usize = 16 * 1024 * 1024; // 16 MiB safeguard
+        let text = normalized.clone();
+        let app_weak = app.as_weak();
+
+        if text.len() <= MAX_TOKENIZE_BYTES {
+            // Tokenize on a worker thread; update the UI on the event loop when done.
+            std::thread::spawn(move || {
+                let tokens = count_tokens(&text); // uses o200k_base().encode_with_special_tokens
+                let chars = text.chars().count();
+                let label = format!("{chars} chars • {tokens} tokens");
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(app) = app_weak.upgrade() {
+                        app.set_output_stats(label.into());
+                    }
+                });
+            });
+        } else {
+            app.set_output_stats(
+                format!("{total_chars} chars • (token count skipped for large output)").into(),
+            );
+        }
+    }
+
+    #[cfg(not(feature = "tokens"))]
+    {
+        // No tokenizer compiled; use the fallback `count_tokens` (whitespace-based) synchronously.
+        let total_tokens = count_tokens(&normalized);
+        app.set_output_stats(format!("{total_chars} chars • {total_tokens} tokens").into());
+    }
+
+    // Truncate for display if needed, but never affect the stored full text.
     let displayed: String = if total_chars <= UI_OUTPUT_CHAR_LIMIT {
         normalized.clone()
     } else {
-        // Using a couple more /n than necessary because I couldn't get padding to work in the UI
         let footer = format!(
-            "\n… [truncated: showing {} of {} chars — use “Copy Output” to copy all]\n\n\n",
+            "\n… [truncated: showing {} of {} chars — use “Copy Output” to copy all]\n",
             UI_OUTPUT_CHAR_LIMIT, total_chars
         );
-        // Ensure we stay within the hard UI limit, including the footer itself
         let keep = UI_OUTPUT_CHAR_LIMIT.saturating_sub(footer.chars().count());
         let mut head: String = normalized.chars().take(keep).collect();
         head.push_str(&footer);
         head
     };
 
+    // Push the visible text to the UI
     app.set_output_text(displayed.clone().into());
 
-    // keep the side "lines" panel synced with what’s displayed
+    // Optional: keep the per-line model (with NBSP for spaces) if your UI still uses it
     let lines: Vec<slint::SharedString> = displayed
         .lines()
         .map(|l| l.replace(' ', "\u{00A0}").into())
@@ -725,6 +761,7 @@ fn set_output(app: &AppWindow, state: &Rc<RefCell<AppState>>, s: &str) {
     let model = slint::VecModel::from(lines);
     app.set_output_lines(slint::ModelRc::new(model));
 }
+
 
 #[cfg(feature = "ui")]
 fn update_last_refresh(app: &AppWindow) {

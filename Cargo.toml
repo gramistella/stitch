@@ -1,6 +1,6 @@
 [package]
 name = "stitch"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2024"
 authors = ["Giovanni Ramistella <crimps-78-pax@icloud.com>"]
 license = "MIT"
@@ -41,6 +41,11 @@ short_description = "Select files from a project and stitch them into one text."
 tempfile = "3"
 pretty_assertions = "1"
 proptest = "1"
+criterion = { version = "0.5", features = ["html_reports"] }
+once_cell = "1"
+walkdir = "2"
+tiktoken-rs = "0.7"
+pathdiff = "0.2"
 
 [[bin]]
 name = "stitch"
@@ -49,3 +54,6 @@ test = false
 doctest = false
 bench = false
 
+[[bench]]
+name = "stitch_bench"
+harness = false
