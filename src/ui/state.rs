@@ -29,7 +29,13 @@ pub struct AppState {
     pub fs_event_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
     pub fs_pump_timer: slint::Timer,
     pub full_output_text: String,
-    pub poll_timer: slint::Timer, // NEW: keep per-window periodic update timer alive
+    pub poll_timer: slint::Timer,
+
+    /// Available profiles (name + scope). Order is alphabetical by name.
+    pub profiles: Vec<stitch::core::ProfileMeta>,
+
+    /// The "Save As…" dialog instance, if shown.
+    pub save_profile_dialog: Option<crate::ui::SaveProfileDialog>,
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;

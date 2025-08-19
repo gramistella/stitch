@@ -14,14 +14,13 @@ use slint::ComponentHandle;
 use ui::{
     AppState, AppWindow, Row, SelectFromTextDialog, apply_selection_from_text, on_check_updates,
     on_copy_output, on_filter_changed, on_generate_output, on_select_folder, on_toggle_check,
-    on_toggle_expand,
+    on_toggle_expand, on_save_profile_as, on_select_profile, on_save_profile_current
 };
 
 #[cfg(feature = "ui")]
 fn spawn_window(registry: Rc<RefCell<Vec<AppWindow>>>) -> anyhow::Result<()> {
     let app = AppWindow::new()?;
 
-    // Initialize UI properties
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
     app.set_ext_filter("".into());
     app.set_exclude_dirs(".git, node_modules, target, _target, .elan, .lake, .idea, .vscode, _app, .svelte-kit, .sqlx, venv, .venv, __pycache__, LICENSES, fixtures".into());
@@ -37,18 +36,19 @@ fn spawn_window(registry: Rc<RefCell<Vec<AppWindow>>>) -> anyhow::Result<()> {
     app.set_copy_toast_text("".into());
     app.set_output_stats("0 chars • 0 tokens".into());
 
-    // Per-window state
+    // Profiles UI defaults
+    app.set_profiles(slint::ModelRc::new(slint::VecModel::from(Vec::<slint::SharedString>::new())));
+    app.set_selected_profile_index(-1);
+
     let state = Rc::new(RefCell::new(AppState {
         poll_interval_ms: 45_000,
         ..Default::default()
     }));
 
-    // Periodic poll timer: capture a Weak to avoid moving `state` while borrowed
     {
         let app_weak = app.as_weak();
         let interval_ms = { state.borrow().poll_interval_ms };
         let state_weak = Rc::downgrade(&state);
-        // borrow only long enough to call `start`, then drop before closure capture
         {
             let st = state.borrow();
             st.poll_timer.start(
@@ -64,7 +64,6 @@ fn spawn_window(registry: Rc<RefCell<Vec<AppWindow>>>) -> anyhow::Result<()> {
         }
     }
 
-    // UI callbacks (per window)
     {
         let app_weak = app.as_weak();
         let state = Rc::clone(&state);
@@ -120,7 +119,6 @@ fn spawn_window(registry: Rc<RefCell<Vec<AppWindow>>>) -> anyhow::Result<()> {
         });
     }
     {
-        // "Select from Text…" dialog
         let app_weak = app.as_weak();
         let state = Rc::clone(&state);
 
@@ -158,7 +156,35 @@ fn spawn_window(registry: Rc<RefCell<Vec<AppWindow>>>) -> anyhow::Result<()> {
         });
     }
 
-    // Multi-window: hook "New Window" button
+    // Profiles: selection + save + save as
+    {
+        let app_weak = app.as_weak();
+        let state = Rc::clone(&state);
+        app.on_select_profile(move |idx| {
+            if let Some(app) = app_weak.upgrade() {
+                on_select_profile(&app, &state, idx);
+            }
+        });
+    }
+    {
+        let app_weak = app.as_weak();
+        let state = Rc::clone(&state);
+        app.on_save_profile(move || {
+            if let Some(app) = app_weak.upgrade() {
+                on_save_profile_current(&app, &state);
+            }
+        });
+    }
+    {
+        let app_weak = app.as_weak();
+        let state = Rc::clone(&state);
+        app.on_save_profile_as(move || {
+            if let Some(app) = app_weak.upgrade() {
+                on_save_profile_as(&app, &state);
+            }
+        });
+    }
+
     {
         let registry_clone = Rc::clone(&registry);
         app.on_new_window(move || {
@@ -166,7 +192,6 @@ fn spawn_window(registry: Rc<RefCell<Vec<AppWindow>>>) -> anyhow::Result<()> {
         });
     }
 
-    // Show this window and keep the handle alive
     app.show()?;
     registry.borrow_mut().push(app);
 

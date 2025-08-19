@@ -1,4 +1,4 @@
-import { VerticalBox, HorizontalBox, Button, LineEdit, CheckBox, ScrollView, TextEdit, ListView, Palette} from "std-widgets.slint";
+import { VerticalBox, HorizontalBox, Button, LineEdit, CheckBox, ScrollView, TextEdit, ListView, Palette, ComboBox} from "std-widgets.slint";
 import "./assets/JetBrainsMono-Regular.ttf";
 
 export struct Row {
@@ -57,6 +57,42 @@ export component SelectFromTextDialog inherits Window {
     }
 }
 
+export component SaveProfileDialog inherits Window {
+    width: 380px;
+    height: 160px;
+    title: "Save Profile As";
+    default-font-family: "JetBrains Mono";
+    icon: @image-url("assets/icon.png");
+
+    in-out property <string> name;
+    in-out property <bool> is-local; // true = private/local, false = shared
+    callback apply(name: string, is_local: bool);
+    callback cancel();
+
+    VerticalBox {
+        spacing: 8px;
+        padding: 10px;
+
+        LabeledEdit {
+            label: "Profile name:";
+            value <=> root.name;
+        }
+
+        CheckBox {
+            text: "Private / Local (not in VCS)";
+            checked <=> root.is-local;
+        }
+
+        HorizontalBox {
+            spacing: 8px;
+            Rectangle { horizontal-stretch: 1; background: transparent; }
+            Button { text: "Save";  clicked => { root.apply(root.name, root.is-local); } }
+            Button { text: "Cancel"; clicked => { root.cancel(); } }
+        }
+    }
+}
+
+
 // In `ui/app.slint`, update the `AppWindow` component (complete component)
 export component AppWindow inherits Window {
     width: 1300px;
@@ -81,6 +117,10 @@ export component AppWindow inherits Window {
     in-out property <[string]> output-lines;
     in-out property <string> output-stats;
 
+    // Profiles UI
+    in-out property <[string]> profiles;
+    in-out property <int> selected-profile-index;
+
     in-out property <bool> show-copy-toast;
     in-out property <string> copy-toast-text;
     
@@ -91,7 +131,12 @@ export component AppWindow inherits Window {
     callback generate-output();
     callback copy-output();
     callback select-from-text();
-    callback new-window(); // NEW
+    callback new-window();
+
+    // Profiles callbacks
+    callback select-profile(index: int);
+    callback save-profile();
+    callback save-profile-as();
 
     VerticalBox {
         spacing: 10px;
@@ -147,8 +192,6 @@ export component AppWindow inherits Window {
                 clicked => { root.copy-output(); }
             }
 
-            
-
             Text {
                 visible: root.show-copy-toast;
                 text: root.copy-toast-text;
@@ -161,6 +204,39 @@ export component AppWindow inherits Window {
             spacing: 12px;
 
             VerticalBox {
+                            // Profiles: ComboBox + Save buttons
+                HorizontalBox {
+                    spacing: 6px;
+                    // ComboBox is in std-widgets.slint
+                    
+                    ComboBox {
+                        width: 210px;
+
+                        // Two-way binding so programmatic changes reflect in the UI and vice versa
+                        current-index <=> root.selected-profile-index;
+
+                        model: root.profiles;
+
+                        // When the user changes it, call into Rust with the current index
+                        selected => {
+                            root.select-profile(root.selected-profile-index);
+                        }
+                    }
+
+
+                    Button {
+                        visible: root.selected-profile-index > 0;
+                        text: "Save";
+                        height: 30px;
+                        clicked => { root.save-profile(); }
+                    }
+                    Button {
+                        visible: root.selected-profile-index >= 0;
+                        text: "Save As…";
+                        height: 30px;
+                        clicked => { root.save-profile-as(); }
+                    }
+                }
                 width: 360px;
             
                 LabeledEdit {
@@ -286,4 +362,3 @@ export component AppWindow inherits Window {
         }
     }
 }
-

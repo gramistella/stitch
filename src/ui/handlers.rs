@@ -12,10 +12,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::sync::mpsc;
 
 use stitch::core::{
-    Node, WorkspaceSettings, clean_remove_regex, collapse_consecutive_blank_lines,
-    collect_selected_paths, compile_remove_regex_opt, ensure_workspace_dir, gather_paths_set,
-    is_ancestor_of, load_workspace, parse_extension_filters, parse_hierarchy_text, path_to_unix,
-    render_unicode_tree_from_paths, save_workspace, scan_dir_to_node, split_prefix_list,
+    clean_remove_regex, collapse_consecutive_blank_lines, collect_selected_paths, compile_remove_regex_opt, ensure_profiles_dirs, ensure_workspace_dir, gather_paths_set, is_ancestor_of, list_profiles, load_profile, load_workspace, parse_extension_filters, parse_hierarchy_text, path_to_unix, render_unicode_tree_from_paths, save_profile, save_workspace, scan_dir_to_node, split_prefix_list, Node, Profile, ProfileScope, WorkspaceSettings
 };
 
 const UI_OUTPUT_CHAR_LIMIT: usize = 50_000;
@@ -71,8 +68,13 @@ pub fn apply_selection_from_text(app: &AppWindow, state: &SharedState, text: &st
 
     refresh_flat_model(app, state);
     on_generate_output(app, state);
+
+    // Persist to selected profile if any
+    autosave_selected_profile(app, state);
 }
 
+
+// In `src/ui/handlers.rs`, update `on_select_folder`:
 pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
     if let Some(dir) = rfd::FileDialog::new().set_directory(".").pick_folder() {
         {
@@ -83,19 +85,21 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
             s.fs_dirty = true;
         }
 
-        // Ensure `.stitchworkspace/` exists and load settings if present.
         let _ = ensure_workspace_dir(&dir);
-        if let Some(ws) = load_workspace(&dir) {
-            // Apply persisted settings to the UI.
-            app.set_ext_filter(ws.ext_filter.into());
-            app.set_exclude_dirs(ws.exclude_dirs.into());
-            app.set_exclude_files(ws.exclude_files.into());
-            app.set_remove_prefix(ws.remove_prefix.into());
-            app.set_remove_regex(ws.remove_regex.into());
+        let _ = ensure_profiles_dirs(&dir);
+
+        // 1) Load workspace settings (if present) and apply ONLY settings to the UI
+        let ws_opt = load_workspace(&dir);
+        if let Some(ws) = ws_opt.as_ref() {
+            app.set_ext_filter(ws.ext_filter.clone().into());
+            app.set_exclude_dirs(ws.exclude_dirs.clone().into());
+            app.set_exclude_files(ws.exclude_files.clone().into());
+            app.set_remove_prefix(ws.remove_prefix.clone().into());
+            app.set_remove_regex(ws.remove_regex.clone().into());
             app.set_hierarchy_only(ws.hierarchy_only);
             app.set_dirs_only(ws.dirs_only);
         } else {
-            // Seed a new workspace with current UI values (startup defaults).
+            // Create a seed workspace so subsequent loads work
             let seed = WorkspaceSettings {
                 version: 1,
                 ext_filter: app.get_ext_filter().to_string(),
@@ -105,11 +109,28 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
                 remove_regex: app.get_remove_regex().to_string(),
                 hierarchy_only: app.get_hierarchy_only(),
                 dirs_only: app.get_dirs_only(),
+                current_profile: None,
             };
             let _ = save_workspace(&dir, &seed);
         }
 
-        // With the UI now reflecting per-project settings, parse and proceed.
+        // 2) Build the profiles list and refresh the ComboBox (this selects the saved profile if any)
+        {
+            let mut s = state.borrow_mut();
+            s.profiles = list_profiles(&dir);
+        }
+        refresh_profiles_ui(app, state);
+
+        // 3) If a current_profile is recorded, load & apply it NOW that the ComboBox index is set
+        if let Some(ws) = ws_opt {
+            if let Some(name) = ws.current_profile {
+                if let Some((profile, _)) = load_profile(&dir, &name) {
+                    apply_profile_to_ui(app, state, &profile);
+                }
+            }
+        }
+
+        // 4) Parse filters, build tree/watchers and update timestamps/output
         parse_filters_from_ui(app, state);
 
         let _ = start_fs_watcher(app, state);
@@ -119,6 +140,8 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
         state.borrow_mut().fs_dirty = false;
     }
 }
+
+
 
 pub fn on_filter_changed(app: &AppWindow, state: &SharedState) {
     parse_filters_from_ui(app, state);
@@ -136,6 +159,7 @@ pub fn on_toggle_expand(app: &AppWindow, state: &SharedState, index: usize) {
     }
 }
 
+// In `src/ui/handlers.rs`, replace the entire `on_toggle_check` function:
 pub fn on_toggle_check(app: &AppWindow, state: &SharedState, index: usize) {
     if let Some(row) = get_row_by_index(app, index) {
         let path = PathBuf::from(row.path.as_str());
@@ -154,8 +178,12 @@ pub fn on_toggle_check(app: &AppWindow, state: &SharedState, index: usize) {
 
         refresh_flat_model(app, state);
         on_generate_output(app, state);
+
+        // If a profile is selected, persist the new selection into it
+        autosave_selected_profile(app, state);
     }
 }
+
 
 pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
     parse_filters_from_ui(app, state);
@@ -378,34 +406,25 @@ fn refresh_flat_model(app: &AppWindow, state: &SharedState) {
 }
 
 fn parse_filters_from_ui(app: &AppWindow, state: &SharedState) {
-    // Raw strings from the UI (these are what we persist)
     let ext_raw = app.get_ext_filter().to_string();
     let exclude_dirs_raw = app.get_exclude_dirs().to_string();
     let exclude_files_raw = app.get_exclude_files().to_string();
     let remove_prefix_raw = app.get_remove_prefix().to_string();
     let remove_regex_raw = app.get_remove_regex().to_string();
 
-    // Parse extension filters
     let (include_exts, exclude_exts) = parse_extension_filters(&ext_raw);
 
-    // Parse CSVs for names
     let mut exclude_dirs_set = split_csv_set(&exclude_dirs_raw.clone().into());
     let exclude_files_set = split_csv_set(&exclude_files_raw.clone().into());
 
-    // Always exclude `.stitchworkspace` internally (even if user forgets)
+    // Always exclude internal workspace dir
     exclude_dirs_set.insert(".stitchworkspace".to_string());
 
-    // Clean the regex string for compilation, but persist the raw input.
     let remove_regex_str = {
         let cleaned = clean_remove_regex(&remove_regex_raw);
-        if cleaned.trim().is_empty() {
-            None
-        } else {
-            Some(cleaned)
-        }
+        if cleaned.trim().is_empty() { None } else { Some(cleaned) }
     };
 
-    // Update state
     {
         let mut st = state.borrow_mut();
         st.include_exts = include_exts;
@@ -417,8 +436,17 @@ fn parse_filters_from_ui(app: &AppWindow, state: &SharedState) {
         st.remove_regex = compile_remove_regex_opt(remove_regex_str.as_deref());
     }
 
-    // Persist current UI preferences into the workspace, if we have a project
-    if let Some(dir) = state.borrow().selected_directory.clone() {
+    // Persist workspace/profile selection only if a project is open.
+    let Some(dir) = state.borrow().selected_directory.clone() else { return; };
+    let idx = app.get_selected_profile_index();
+
+    // IMPORTANT: -1 means "uninitialized UI selection". Don't overwrite workspace yet.
+    if idx < 0 {
+        return;
+    }
+
+    if idx == 0 {
+        // Explicitly on "— Workspace —": save settings with no current profile.
         let ws = WorkspaceSettings {
             version: 1,
             ext_filter: ext_raw,
@@ -428,10 +456,28 @@ fn parse_filters_from_ui(app: &AppWindow, state: &SharedState) {
             remove_regex: remove_regex_raw,
             hierarchy_only: app.get_hierarchy_only(),
             dirs_only: app.get_dirs_only(),
+            current_profile: None,
         };
         let _ = save_workspace(&dir, &ws);
+    } else {
+        // A profile is selected: auto-save that profile and persist its name in workspace.json.
+        autosave_selected_profile(app, state);
+
+        if let Some(mut ws) = load_workspace(&dir) {
+            if let Some(meta) = state
+                .borrow()
+                .profiles
+                .get((idx as usize) - 1)
+            {
+                ws.current_profile = Some(meta.name.clone());
+                let _ = save_workspace(&dir, &ws);
+            }
+        }
     }
 }
+
+
+
 
 fn toggle_node_expanded(state: &SharedState, path: &Path) -> bool {
     fn rec(n: &mut Node, target: &Path) -> bool {
@@ -747,4 +793,292 @@ fn count_tokens(text: &str) -> usize {
 #[cfg(all(feature = "ui", not(feature = "tokens")))]
 fn count_tokens(text: &str) -> usize {
     text.split_whitespace().filter(|s| !s.is_empty()).count()
+}
+
+
+fn refresh_profiles_ui(app: &AppWindow, state: &SharedState) {
+    // If no folder is selected: show an empty ComboBox and no selection
+    let no_folder = { state.borrow().selected_directory.is_none() };
+    if no_folder {
+        app.set_profiles(slint::ModelRc::new(slint::VecModel::from(Vec::<slint::SharedString>::new())));
+        app.set_selected_profile_index(-1);
+        return;
+    }
+
+    let (names, desired_idx) = {
+        let s = state.borrow();
+
+        let mut names: Vec<slint::SharedString> = Vec::new();
+        names.push("— Workspace —".into());
+        for p in &s.profiles {
+            names.push(p.name.clone().into());
+        }
+
+        let current_profile_name = load_workspace(
+            s.selected_directory
+                .as_ref()
+                .map(|p| p.as_path())
+                .unwrap_or_else(|| std::path::Path::new("")),
+        )
+        .and_then(|w| w.current_profile);
+
+        let idx = if let Some(sel) = current_profile_name {
+            let mut found = 0i32;
+            for i in 1..names.len() {
+                if names[i].as_str() == sel {
+                    found = i as i32;
+                    break;
+                }
+            }
+            found
+        } else {
+            0
+        };
+
+        (names, idx)
+    };
+
+    app.set_profiles(slint::ModelRc::new(slint::VecModel::from(names)));
+
+    let model_len = app.get_profiles().row_count();
+    let clamped_idx = if model_len == 0 {
+        -1
+    } else if desired_idx >= 0 && (desired_idx as usize) < model_len {
+        desired_idx
+    } else {
+        0
+    };
+    app.set_selected_profile_index(clamped_idx);
+
+    // Ensure UI reflects the index after the model swap
+    let app_weak = app.as_weak();
+    slint::invoke_from_event_loop(move || {
+        if let Some(app) = app_weak.upgrade() {
+            app.set_selected_profile_index(clamped_idx);
+        }
+    }).ok();
+}
+
+fn capture_profile_from_ui(app: &AppWindow, state: &SharedState, name: &str) -> Option<Profile> {
+    let dir = { state.borrow().selected_directory.clone()? };
+
+    let ws = WorkspaceSettings {
+        version: 1,
+        ext_filter: app.get_ext_filter().to_string(),
+        exclude_dirs: app.get_exclude_dirs().to_string(),
+        exclude_files: app.get_exclude_files().to_string(),
+        remove_prefix: app.get_remove_prefix().to_string(),
+        remove_regex: app.get_remove_regex().to_string(),
+        hierarchy_only: app.get_hierarchy_only(),
+        dirs_only: app.get_dirs_only(),
+        current_profile: Some(name.to_string()),
+    };
+
+    // convert explicit_states to project-relative unix paths
+    let explicit = {
+        let s = state.borrow();
+        s.explicit_states
+            .iter()
+            .filter_map(|(abs, &st)| {
+                if let Ok(rel) = abs.strip_prefix(&dir) {
+                    if !rel.as_os_str().is_empty() {
+                        Some(stitch::core::ProfileSelection {
+                            path: path_to_unix(rel),
+                            state: st,
+                        })
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+
+    Some(Profile {
+        name: name.to_string(),
+        settings: ws,
+        explicit,
+    })
+}
+
+fn apply_profile_to_ui(app: &AppWindow, state: &SharedState, profile: &Profile) {
+    // Apply settings to UI
+    app.set_ext_filter(profile.settings.ext_filter.clone().into());
+    app.set_exclude_dirs(profile.settings.exclude_dirs.clone().into());
+    app.set_exclude_files(profile.settings.exclude_files.clone().into());
+    app.set_remove_prefix(profile.settings.remove_prefix.clone().into());
+    app.set_remove_regex(profile.settings.remove_regex.clone().into());
+    app.set_hierarchy_only(profile.settings.hierarchy_only);
+    app.set_dirs_only(profile.settings.dirs_only);
+
+    // Update filters in state
+    parse_filters_from_ui(app, state);
+
+    // Apply explicit selections
+    let base = { state.borrow().selected_directory.clone() };
+    {
+        let mut s = state.borrow_mut();
+        s.explicit_states.clear();
+        if let Some(root) = base.as_ref() {
+            for sel in &profile.explicit {
+                let abs = root.join(sel.path.replace('/', std::path::MAIN_SEPARATOR.to_string().as_str()));
+                s.explicit_states.insert(abs, sel.state);
+            }
+        }
+    }
+
+    rebuild_tree_and_ui(app, state);
+    on_generate_output(app, state);
+}
+
+// In `src/ui/handlers.rs`, replace the entire `on_select_profile` function:
+pub fn on_select_profile(app: &AppWindow, state: &SharedState, index: i32) {
+    let project_root = { state.borrow().selected_directory.clone() };
+    let Some(root) = project_root else { return; };
+
+    if index <= 0 {
+        // Switch to Workspace mode (profileless)
+        if let Some(mut ws) = load_workspace(&root) {
+            ws.current_profile = None;
+            let _ = save_workspace(&root, &ws);
+
+            // Apply global settings to UI
+            app.set_ext_filter(ws.ext_filter.into());
+            app.set_exclude_dirs(ws.exclude_dirs.into());
+            app.set_exclude_files(ws.exclude_files.into());
+            app.set_remove_prefix(ws.remove_prefix.into());
+            app.set_remove_regex(ws.remove_regex.into());
+            app.set_hierarchy_only(ws.hierarchy_only);
+            app.set_dirs_only(ws.dirs_only);
+
+            parse_filters_from_ui(app, state);
+
+            // Clear profile-specific selections
+            state.borrow_mut().explicit_states.clear();
+
+            rebuild_tree_and_ui(app, state);
+            on_generate_output(app, state);
+        }
+        return;
+    }
+
+    // Profile selected
+    let (name, _scope) = {
+        let s = state.borrow();
+        // shift by 1 because index 0 is "Workspace"
+        let Some(meta) = s.profiles.get((index as usize) - 1) else { return; };
+        (meta.name.clone(), meta.scope)
+    };
+
+    if let Some((profile, _)) = load_profile(&root, &name) {
+        // Persist current_profile on selection
+        if let Some(mut ws) = load_workspace(&root) {
+            ws.current_profile = Some(name.clone());
+            let _ = save_workspace(&root, &ws);
+        }
+        apply_profile_to_ui(app, state, &profile);
+    }
+}
+
+
+pub fn on_save_profile_current(app: &AppWindow, state: &SharedState) {
+    let idx = app.get_selected_profile_index();
+    // If nothing or "Workspace" is selected, we don't have a concrete profile -> Save As…
+    if idx <= 0 {
+        on_save_profile_as(app, state);
+        return;
+    }
+
+    let (name, scope, project_root) = {
+        let s = state.borrow();
+        let Some(dir) = s.selected_directory.clone() else { return; };
+        // UI index 1 corresponds to profiles[0]
+        let Some(meta) = s.profiles.get((idx as usize).saturating_sub(1)) else { return; };
+        (meta.name.clone(), meta.scope, dir)
+    };
+
+    if let Some(profile) = capture_profile_from_ui(app, state, &name) {
+        let _ = save_profile(&project_root, &profile, scope);
+        if let Some(mut ws) = load_workspace(&project_root) {
+            ws.current_profile = Some(name.clone());
+            let _ = save_workspace(&project_root, &ws);
+        }
+    }
+}
+
+
+
+pub fn on_save_profile_as(app: &AppWindow, state: &SharedState) {
+    // Reuse existing dialog if present
+    if let Some(d) = state.borrow().save_profile_dialog.as_ref() {
+        let _ = d.show();
+        return;
+    }
+
+    let dlg = crate::ui::SaveProfileDialog::new().expect("create SaveProfileDialog");
+    dlg.set_name("".into());
+    dlg.set_is_local(false);
+
+    // Apply handler
+    let dlg_apply = dlg.as_weak();
+    let state_apply = state.clone();
+    let app_apply = app.as_weak();
+
+    dlg.on_apply(move |name, is_local| {
+        if let (Some(app), Some(state_rc)) = (app_apply.upgrade(), Some(state_apply.clone())) {
+            let scope = if is_local { ProfileScope::Local } else { ProfileScope::Shared };
+            let project_root = { state_rc.borrow().selected_directory.clone() };
+            if let Some(root) = project_root {
+                if let Some(profile) = capture_profile_from_ui(&app, &state_rc, name.as_str()) {
+                    let _ = save_profile(&root, &profile, scope);
+
+                    // refresh list + select the saved name
+                    {
+                        let mut s = state_rc.borrow_mut();
+                        s.profiles = list_profiles(&root);
+                    }
+                    refresh_profiles_ui(&app, &state_rc);
+
+                    // persist current_profile in workspace
+                    if let Some(mut ws) = load_workspace(&root) {
+                        ws.current_profile = Some(profile.name.clone());
+                        let _ = save_workspace(&root, &ws);
+                    }
+                }
+            }
+        }
+        if let Some(d) = dlg_apply.upgrade() {
+            let _ = d.hide();
+        }
+    });
+
+    // Cancel handler
+    let dlg_cancel = dlg.as_weak();
+    dlg.on_cancel(move || {
+        if let Some(d) = dlg_cancel.upgrade() {
+            let _ = d.hide();
+        }
+    });
+
+    state.borrow_mut().save_profile_dialog = Some(dlg);
+    let _ = state.borrow().save_profile_dialog.as_ref().unwrap().show();
+}
+
+fn autosave_selected_profile(app: &AppWindow, state: &SharedState) {
+    let idx = app.get_selected_profile_index();
+    if idx <= 0 {
+        return; // 0 = "Workspace" (profileless), <0 = nothing selected
+    }
+    let (name, scope, root) = {
+        let s = state.borrow();
+        let Some(dir) = s.selected_directory.clone() else { return; };
+        // profiles vec doesn't include the "Workspace" placeholder, so shift by 1
+        let Some(meta) = s.profiles.get((idx as usize) - 1) else { return; };
+        (meta.name.clone(), meta.scope, dir)
+    };
+    if let Some(profile) = capture_profile_from_ui(app, state, &name) {
+        let _ = save_profile(&root, &profile, scope);
+    }
 }
