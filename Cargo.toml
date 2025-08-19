@@ -22,10 +22,10 @@ tiktoken-rs = { version = "0.7", optional = true }
 regex = "1"
 anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-#pathdiff = "0.2"
 serde_json = "1"
 dunce = "1"
 notify = "6"
+serde = { version = "1", features = ["derive"] }
 
 [build-dependencies]
 slint-build = "1"
@@ -45,7 +45,6 @@ criterion = { version = "0.5", features = ["html_reports"] }
 once_cell = "1"
 walkdir = "2"
 tiktoken-rs = "0.7"
-pathdiff = "0.2"
 
 [[bin]]
 name = "stitch"

@@ -12,10 +12,10 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::sync::mpsc;
 
 use stitch::core::{
-    Node, clean_remove_regex, collapse_consecutive_blank_lines, collect_selected_paths,
-    compile_remove_regex_opt, gather_paths_set, is_ancestor_of, parse_extension_filters,
-    parse_hierarchy_text, path_to_unix, render_unicode_tree_from_paths, scan_dir_to_node,
-    split_prefix_list,
+    Node, WorkspaceSettings, clean_remove_regex, collapse_consecutive_blank_lines,
+    collect_selected_paths, compile_remove_regex_opt, ensure_workspace_dir, gather_paths_set,
+    is_ancestor_of, load_workspace, parse_extension_filters, parse_hierarchy_text, path_to_unix,
+    render_unicode_tree_from_paths, save_workspace, scan_dir_to_node, split_prefix_list,
 };
 
 const UI_OUTPUT_CHAR_LIMIT: usize = 50_000;
@@ -82,8 +82,37 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
             s.last_mod_times.clear();
             s.fs_dirty = true;
         }
-        let _ = start_fs_watcher(app, state);
 
+        // Ensure `.stitchworkspace/` exists and load settings if present.
+        let _ = ensure_workspace_dir(&dir);
+        if let Some(ws) = load_workspace(&dir) {
+            // Apply persisted settings to the UI.
+            app.set_ext_filter(ws.ext_filter.into());
+            app.set_exclude_dirs(ws.exclude_dirs.into());
+            app.set_exclude_files(ws.exclude_files.into());
+            app.set_remove_prefix(ws.remove_prefix.into());
+            app.set_remove_regex(ws.remove_regex.into());
+            app.set_hierarchy_only(ws.hierarchy_only);
+            app.set_dirs_only(ws.dirs_only);
+        } else {
+            // Seed a new workspace with current UI values (startup defaults).
+            let seed = WorkspaceSettings {
+                version: 1,
+                ext_filter: app.get_ext_filter().to_string(),
+                exclude_dirs: app.get_exclude_dirs().to_string(),
+                exclude_files: app.get_exclude_files().to_string(),
+                remove_prefix: app.get_remove_prefix().to_string(),
+                remove_regex: app.get_remove_regex().to_string(),
+                hierarchy_only: app.get_hierarchy_only(),
+                dirs_only: app.get_dirs_only(),
+            };
+            let _ = save_workspace(&dir, &seed);
+        }
+
+        // With the UI now reflecting per-project settings, parse and proceed.
+        parse_filters_from_ui(app, state);
+
+        let _ = start_fs_watcher(app, state);
         rebuild_tree_and_ui(app, state);
         update_last_refresh(app);
 
@@ -349,17 +378,26 @@ fn refresh_flat_model(app: &AppWindow, state: &SharedState) {
 }
 
 fn parse_filters_from_ui(app: &AppWindow, state: &SharedState) {
+    // Raw strings from the UI (these are what we persist)
     let ext_raw = app.get_ext_filter().to_string();
+    let exclude_dirs_raw = app.get_exclude_dirs().to_string();
+    let exclude_files_raw = app.get_exclude_files().to_string();
+    let remove_prefix_raw = app.get_remove_prefix().to_string();
+    let remove_regex_raw = app.get_remove_regex().to_string();
+
+    // Parse extension filters
     let (include_exts, exclude_exts) = parse_extension_filters(&ext_raw);
 
-    let exclude_dirs = split_csv_set(&app.get_exclude_dirs());
-    let exclude_files = split_csv_set(&app.get_exclude_files());
+    // Parse CSVs for names
+    let mut exclude_dirs_set = split_csv_set(&exclude_dirs_raw.clone().into());
+    let exclude_files_set = split_csv_set(&exclude_files_raw.clone().into());
 
-    let remove_prefixes = split_prefix_list(&app.get_remove_prefix());
+    // Always exclude `.stitchworkspace` internally (even if user forgets)
+    exclude_dirs_set.insert(".stitchworkspace".to_string());
 
+    // Clean the regex string for compilation, but persist the raw input.
     let remove_regex_str = {
-        let raw = app.get_remove_regex().to_string();
-        let cleaned = clean_remove_regex(&raw);
+        let cleaned = clean_remove_regex(&remove_regex_raw);
         if cleaned.trim().is_empty() {
             None
         } else {
@@ -367,14 +405,32 @@ fn parse_filters_from_ui(app: &AppWindow, state: &SharedState) {
         }
     };
 
-    let mut st = state.borrow_mut();
-    st.include_exts = include_exts;
-    st.exclude_exts = exclude_exts;
-    st.exclude_dirs = exclude_dirs;
-    st.exclude_files = exclude_files;
-    st.remove_prefixes = remove_prefixes;
-    st.remove_regex_str = remove_regex_str.clone();
-    st.remove_regex = compile_remove_regex_opt(remove_regex_str.as_deref());
+    // Update state
+    {
+        let mut st = state.borrow_mut();
+        st.include_exts = include_exts;
+        st.exclude_exts = exclude_exts;
+        st.exclude_dirs = exclude_dirs_set;
+        st.exclude_files = exclude_files_set;
+        st.remove_prefixes = split_prefix_list(&remove_prefix_raw);
+        st.remove_regex_str = remove_regex_str.clone();
+        st.remove_regex = compile_remove_regex_opt(remove_regex_str.as_deref());
+    }
+
+    // Persist current UI preferences into the workspace, if we have a project
+    if let Some(dir) = state.borrow().selected_directory.clone() {
+        let ws = WorkspaceSettings {
+            version: 1,
+            ext_filter: ext_raw,
+            exclude_dirs: exclude_dirs_raw,
+            exclude_files: exclude_files_raw,
+            remove_prefix: remove_prefix_raw,
+            remove_regex: remove_regex_raw,
+            hierarchy_only: app.get_hierarchy_only(),
+            dirs_only: app.get_dirs_only(),
+        };
+        let _ = save_workspace(&dir, &ws);
+    }
 }
 
 fn toggle_node_expanded(state: &SharedState, path: &Path) -> bool {

@@ -12,6 +12,8 @@ pub struct Node {
 
 mod fs;
 mod text;
+mod workspace;
 
 pub use fs::*;
 pub use text::*;
+pub use workspace::*;
