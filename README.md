@@ -1,166 +1,245 @@
 # Stitch
 
-> **Rewritten from Python (Tkinter) to Rust (Slint)** for speed, portability, and a cleaner UX.  
-> Original Python project served as the prototype; this repository is the modern Rust implementation.
+![Rust CI](https://github.com/gramistella/cornerstone/actions/workflows/ci.yml/badge.svg)
+[![Rust Version](https://img.shields.io/badge/rust-1.89.0%2B-blue.svg)](https://www.rust-lang.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-Stitch is a lightweight desktop utility that lets you **select a precise slice of a codebase** and “stitch” it into a single, shareable text block. It’s designed to work with the **LLM chat interfaces you already use**—pasteable, auditable, and editor-agnostic.
+Stitch is a lightweight desktop utility that lets you **select a precise slice of a codebase** and “stitch” it into a single, shareable text block. It’s designed for **LLM chat interfaces you already use**—pasteable, auditable, and editor-agnostic.
+
+> Originally prototyped in Python/Tk. Now rewritten in **Rust + Slint** for speed, portability, and a cleaner UX.
 
 ---
 
-## ✨ Highlights
+## ✨ What it does
 
-- **Fast, native UI (Slint)** with a responsive tree and larger projects handled more smoothly than the Python/Tk version.
-- **Deterministic context packing:** you choose exactly which files/dirs are included and how they’re scrubbed.
-- **Powerful filtering:**
-  - Include by extension (e.g. `.rs,.toml`)
-  - Exclude by extension via a leading `-` (e.g. `-.lock,-.png`)
-  - Exclude common dirs/files (e.g. `node_modules`, `target`, `.git`, lockfiles, caches)
-- **Two “only” modes:** _Hierarchy Only_ (just the tree) and _Directories Only_.
-- **“Select from Text…”**: paste a previously generated tree to auto-reselect the same files—great for bug repros and LLM-guided minimal contexts.
-- **Scrubbing tools:** strip lines starting with given prefixes and/or apply a custom **regex** to remove spans before output.
-- **Auto refresh:** watches for project changes on a polling interval and regenerates when selected files change.
+- **Fast native UI (Slint)** with a responsive tree even on large projects.
+- **Deterministic context packing**: you decide exactly which files/dirs are included and how they’re scrubbed.
+- **Powerful filtering**
+  - Include by extension: `.rs,.toml`
+  - Exclude by extension (leading `-`): `-.lock,-.png`
+  - Include takes precedence over exclude when both are present.
+  - Dotfiles are visible by default.
+- **Two “only” modes**
+  - **Hierarchy Only** – just the tree
+  - **Directories Only** – only directory names (no file contents)
+- **“Select from Text…”**: paste a previously generated tree to auto-reselect the same files.
+- **Scrubbing tools**
+  - **Remove lines starting with** prefixes (e.g. `#, //, --`)
+  - **Remove regex** (wrapped as `(?ms)` under the hood) to delete spans/blocks
+- **Auto refresh**
+  - Event-driven (via `notify`) with a lightweight periodic check; only triggers when changes are relevant given your filters.
 - **One-click copy** of the final output.
+- **Token & character stats**
+  - Uses `tiktoken-rs` (`o200k_base`) when the `tokens` feature is enabled.
 
 ---
 
-## 🆚 What changed from the Python version?
+## 🧭 Philosophy
 
-- **Language/GUI:** Python + Tkinter → **Rust + Slint**
-- **Performance:** faster directory scanning, smoother UI, better handling of larger trees.
-- **UX polish:** richer tree interactions, consistent fonts, and better output formatting.
-- **Packaging:** macOS DMG recipe via `cargo-bundle` (see `just dmg`), with cross-platform builds via Cargo.
-
----
-
-## 🧭 Core Philosophy
-
-- Use the **chat models you already have**—no API keys required.
-- **Full control & auditability:** you see and decide what the model sees.
-- Curated, minimal context often **outperforms** automatic retrieval for long-tail tasks.
+- Use the **chat models you already have**—no API keys.
+- **Full control & auditability**: you see exactly what the model sees.
+- A curated, minimal context often **beats** generic retrieval on long-tail tasks.
 
 ---
 
-## 🚀 Getting Started
+## 🧰 Install & Run
 
 ### Prerequisites
-
-- **Rust** (latest stable toolchain) and **Cargo**
-- macOS users (optional for DMG): `cargo-bundle` (installed automatically by the `just dmg` recipe)
+- **Rust** (stable) + **Cargo**
+- Optional packaging helpers:
+  - macOS DMG: `cargo-bundle` (auto-installed by `just dmg`)
+  - `just` if you want the packaging shortcuts used by CI
 
 ### Run in dev
-
-```bash
-cargo run
-
-# or optimized:
-cargo run --release
 ```
+bash
+cargo run --features ui,tokens
+# or optimized:
+cargo run --release --features ui,tokens
+```
+
+> The default crate features already include `ui` and `tokens`.  
+> Headless builds for tests: `cargo test --no-default-features`.
 
 ### Build a release binary
-
-```bash
-cargo build --release
+```
+bash
+cargo build --release --features ui,tokens
 ```
 
-### Create a macOS DMG (optional)
+### Create distributables (same commands CI uses)
 
-```bash
-just dmg
-# Produces: dist/Stitch-<version>.dmg
+Requires `just`:
+```
+bash
+cargo install just --locked
 ```
 
-> macOS note: If, after installing, you see the error
->
->“Stitch” is damaged and can’t be opened.
-> You should eject the disk image."
->
->Clear the quarantine attributes:
->
->```bash
->xattr -cr /Applications/Stitch.app
->```
->
->This removes the quarantine flag so the app can launch.
+- **macOS (.app + .dmg)**
+  ```
+  bash
+  just dmg
+  # -> dist/Stitch-<version>.dmg
+  ```
+- **Windows (.zip with stitch.exe)**
+  ```
+  bash
+  just exe
+  # -> dist/stitch-<version>-windows-x86_64.zip
+  ```
+- **Linux (.tar.gz)**
+  ```
+  bash
+  just tgz
+  # -> dist/stitch-<version>-linux-<arch>[-musl].tar.gz
+  ```
+
+Cross-compile by setting `TARGET=<triple>` (e.g. `x86_64-unknown-linux-musl`) before running the recipe.
+
+> **macOS Gatekeeper note**  
+> If you see “Stitch is damaged and can’t be opened”:
+> ```
+> bash
+> xattr -cr /Applications/Stitch.app
+> ```
 
 ---
 
-## 🖱️ How to Use
+## 🖱️ How to use
 
-1. **Select Folder** – choose the project root.
+1. **Select Folder** – choose your project root.
 2. **Adjust Filters** (optional):
-
-   * **Filter Extensions:** comma-separated. Examples:
-
-     * Include only: `.rs,.toml`
-     * Exclude some: `-.lock,-.png`
-     * Mix (include takes precedence): `.rs,.md,-.lock`
-   * **Exclude Directories / Files:** comma-separated names (pre-filled with sensible defaults).
-3. **Select Items** – check files or whole directories in the tree. Directory checks cascade to children (you can override specific files).
-4. **Choose Mode**:
-
-   * **Hierarchy Only** – emits only the tree.
-   * **Directories Only** – tree of selected dirs (no file contents).
-5. **Generate Output** – Stitch prints:
-
-   * `=== FILE HIERARCHY ===` (unicode tree)
-   * `=== FILE CONTENTS ===` with per-file blocks when not in an “only” mode.
-6. **Copy Output** – one click to put everything on your clipboard.
+   - **Filter Extensions** (comma-separated):
+     - include only: `.rs,.toml`
+     - exclude some: `-.lock,-.png`
+     - mixing (include wins): `.rs,.md,-.lock`
+   - **Exclude Directories / Files** (comma-separated basenames)
+     - sensible defaults are pre-filled (e.g. `.git`, `node_modules`, `target`, `LICENSE`, lockfiles, etc.)
+3. **Select Items** – check files or directories. Directory checks cascade; you can override at any level.
+4. **Choose Mode**
+   - **Hierarchy Only** – emits only the tree
+   - **Directories Only** – emits only selected dirs (no file contents)
+5. **Generate Output** – you’ll get:
+   - `=== FILE HIERARCHY ===` (unicode tree)
+   - `=== FILE CONTENTS ===` (unless an “only” mode is active)
+6. **Copy Output** – copies the **entire** output (even if the UI truncates display for very large results).
 
 ### “Select from Text…” (round-trip selection)
-
-Paste a hierarchy produced by Stitch (first line is the root folder name). Stitch parses it and auto-selects those files, so teams (or an LLM) can propose exactly what to include next run.
-
----
-
-## 🔧 Scrubbing & Cleanup
-
-* **Remove lines starting with:** Comma-separated prefixes. Lines beginning with any of these (ignoring indentation) are removed; if a prefix appears mid-line after whitespace and a word boundary, the remainder of the line is stripped.
-* **Remove regex:** A multi-line, dot-matches-newline regex (we wrap your pattern with `(?ms)` under the hood). Useful to drop regions, banners, or credentials you’ve already sanitized locally.
-
-> ⚠️ Regex/prefix removal is content-agnostic; it won’t parse language syntax. Use carefully to avoid changing semantics if you’re pasting code back into a compiler.
+Paste a Stitch-generated hierarchy (first line = root folder name). Stitch parses it and reselects the files.  
+Works with CRLF/LF line endings and is tolerant of trailing whitespace/blank lines.
 
 ---
 
-## 🧩 Typical Workflows
+## 🧠 Profiles & Workspace
 
-* **LLM context packing:** curate a minimal set of files and scrub noise before pasting into a chat.
-* **Minimal repros:** share only the relevant sources and a tree.
-* **Reviews & handoffs:** generate a portable, single-blob snapshot for PRs, issues, or email.
-* **LLM-guided selection:** let a model propose a minimal tree; paste it back via “Select from Text…”
+Stitch keeps per-project state in a `.stitchworkspace` folder (auto-excluded from scans).
 
----
-
-## 🛠️ Implementation Notes
-
-* **Tech:** Rust, Slint UI, `rfd` (folder dialog), `regex`, `chrono`, `arboard` (clipboard), `pathdiff`, `dunce`.
-* **Auto-refresh:** 30s polling interval compares a path snapshot and selected file mtimes; regenerates output when needed.
-* **Icons/Fonts:** JetBrains Mono bundled for consistent rendering.
-
----
-
-## ⚠️ Known Limitations
-
-* **Very large repos:** initial scans can still be heavy. Use filters/exclusions early.
-* **Binary/huge files:** not parsed specially—consider excluding or adding size caps in future releases.
-* **Regex/prefix stripping:** may remove content inside strings/comments unintentionally; double-check before sharing.
+- **Workspace settings** (`workspace.json`): the “— Workspace —” entry in the selector.
+- **Profiles**: save **named** selections and settings.
+  - **Shared** profiles: `.stitchworkspace/profiles/*.json` (check these into VCS to share)
+  - **Local/Private** profiles: `.stitchworkspace/local/profiles/*.json` (ignored by VCS)
+- UI actions:
+  - **Save Workspace Settings** (when “— Workspace —” is selected)
+  - **Save / Save As…** (choose Shared vs Local)
+  - **Delete**, **Discard Changes**
+- The current profile is remembered in `workspace.json`.
 
 ---
 
-## 🗺️ Roadmap (nice-to-haves)
+## 🧽 Scrubbing & Cleanup
 
-* File-watcher back-end (event-driven instead of polling)
-* Optional size/binary detection and skip notices
-* `.gitignore`/glob support via `ignore` crate
-* Save output to file (in addition to copy)
-* CLI/daemon mode to enable IDE/agent integrations
-* Token/char counters for budget planning
-* Source map for patch application workflows
+- **Remove lines starting with:** comma-separated prefixes (e.g., `#, //, --`).
+  - Full-line comments are removed (leading whitespace allowed).
+  - **Inline** comments are removed only when **immediately preceded by whitespace** (incl. Unicode spaces & tabs).
+  - **Protected regions:** content inside normal strings, raw strings (`r#"..."#` with hashes), and triple quotes (`"""..."""` / `'''...'''`) is preserved.
+- **Remove regex:** your pattern is compiled as `(?ms)<your-pattern>` (multi-line + dot-matches-newline).
+  - You may quote it with single/double or triple quotes; Stitch will strip the quotes before compiling.
+
+> ⚠️ Scrubbing is text-only; it doesn’t parse language syntax. Double-check semantics before pasting back into a compiler.
+
+---
+
+## 🧩 Typical workflows
+
+- **LLM context packing**: curate a minimal, auditable set of files.
+- **Minimal repros**: share only the relevant sources + a tree.
+- **Reviews & handoffs**: generate a portable snapshot for PRs/issues/email.
+- **LLM-guided selection**: let a model propose a minimal tree; paste via “Select from Text…”.
+
+---
+
+## 🔬 Implementation notes
+
+- **Tech**: Rust 2024 edition, Slint, `rfd`, `notify`, `regex`, `chrono`, `serde`/`serde_json`, `dunce`, `arboard`.
+- **Auto refresh**:
+  - Event-driven (`notify`) pump that filters out irrelevant changes (e.g., excluded dirs/files).
+  - A lightweight periodic check is also in place.
+- **Display limits**: the UI shows up to ~50k characters for responsiveness; **Copy Output** always copies the full text.
+- **Token counting**:
+  - With the `tokens` feature, Stitch uses `tiktoken-rs` (`o200k_base`) and counts special tokens.
+  - For very large outputs (>16 MB) or without `tokens`, it falls back to a cheap approximation.
+- **Extension matching semantics**:
+  - Case-insensitive (`.TXT` matches `.txt`).
+  - “Include” mode shows only files whose **last** extension segment matches (so `archive.tar.gz` is treated as `.gz`).
+
+---
+
+## 🧪 Testing & Benchmarks
+
+- **Tests (headless)**  
+  ```
+  bash
+  cargo test --no-default-features
+  ```
+  CI runs these on Linux/macOS/Windows and also checks the UI build path.
+
+- **Benchmarks** (Criterion with HTML reports)  
+  ```
+  bash
+  cargo bench
+  # results under target/criterion
+  ```
+
+---
+
+## 🤖 CI & Releases
+
+- **CI**: `.github/workflows/ci.yml`
+  - Lints (fmt + clippy), tests headless, and verifies the UI build path.
+- **Releases**: `.github/workflows/release.yml`
+  - Tag `v*` to build portable artifacts for Linux (`.tar.gz`), Windows (`.zip`), and macOS (`.dmg`), then attach to a GitHub Release.
+
+---
+
+## 🔧 Feature flags
+
+- `ui` (default): build the Slint desktop app.
+- `tokens` (default): enable accurate token counting with `tiktoken-rs`.
+
+Headless library/test builds:
+```
+bash
+cargo build --no-default-features
+cargo test  --no-default-features
+```
+
+> When built *without* `ui`, the `stitch` binary only prints a helpful message; the core library remains available for tests.
+
+---
+
+## 🧱 Known limitations / edges
+
+- **Very large repos**: first scan can be heavy—lean on filters early.
+- **Binary/huge files**: not specially parsed; consider excluding them.
+- **Multi-dot extensions**: only the **last** segment is considered (e.g., `.tar.gz` → `.gz`).
+- **Scrubbing**: may remove content inside comments/strings in ways that matter to your code—review before sharing.
 
 ---
 
 ## 🤝 Contributing
 
-Issues and PRs welcome—whether for defaults (exclusions), performance tweaks, UI polish, or new integrations.
+Issues and PRs welcome—especially around defaults (exclusions), performance, UI polish, and integrations.  
+If adding assets, place third-party licenses in `LICENSES/`.
 
 ---
 

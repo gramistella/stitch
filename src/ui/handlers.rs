@@ -612,14 +612,6 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
     };
 
     app.set_output_text(displayed.clone().into());
-
-    let lines: Vec<slint::SharedString> = displayed
-        .lines()
-        .map(|l| l.replace(' ', "\u{00A0}").into())
-        .collect();
-
-    let model = slint::VecModel::from(lines);
-    app.set_output_lines(slint::ModelRc::new(model));
 }
 
 fn update_last_refresh(app: &AppWindow) {
