@@ -1,6 +1,6 @@
 # Stitch
 
-![Rust CI](https://github.com/gramistella/cornerstone/actions/workflows/ci.yml/badge.svg)
+![Rust CI](https://github.com/gramistella/stitch/actions/workflows/ci.yml/badge.svg)
 [![Rust Version](https://img.shields.io/badge/rust-1.89.0%2B-blue.svg)](https://www.rust-lang.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
