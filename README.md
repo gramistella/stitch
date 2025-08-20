@@ -51,8 +51,7 @@ Stitch is a lightweight desktop utility that lets you **select a precise slice o
   - `just` if you want the packaging shortcuts used by CI
 
 ### Run in dev
-```
-bash
+```bash
 cargo run --features ui,tokens
 # or optimized:
 cargo run --release --features ui,tokens
@@ -62,34 +61,29 @@ cargo run --release --features ui,tokens
 > Headless builds for tests: `cargo test --no-default-features`.
 
 ### Build a release binary
-```
-bash
+```bash
 cargo build --release --features ui,tokens
 ```
 
 ### Create distributables (same commands CI uses)
 
 Requires `just`:
-```
-bash
+```bash
 cargo install just --locked
 ```
 
 - **macOS (.app + .dmg)**
-  ```
-  bash
+  ```bash
   just dmg
   # -> dist/Stitch-<version>.dmg
   ```
 - **Windows (.zip with stitch.exe)**
-  ```
-  bash
+  ```bash
   just exe
   # -> dist/stitch-<version>-windows-x86_64.zip
   ```
 - **Linux (.tar.gz)**
-  ```
-  bash
+  ```bash
   just tgz
   # -> dist/stitch-<version>-linux-<arch>[-musl].tar.gz
   ```
@@ -98,8 +92,7 @@ Cross-compile by setting `TARGET=<triple>` (e.g. `x86_64-unknown-linux-musl`) be
 
 > **macOS Gatekeeper note**  
 > If you see “Stitch is damaged and can’t be opened”:
-> ```
-> bash
+> ```bash
 > xattr -cr /Applications/Stitch.app
 > ```
 
@@ -187,15 +180,13 @@ Stitch keeps per-project state in a `.stitchworkspace` folder (auto-excluded fro
 ## 🧪 Testing & Benchmarks
 
 - **Tests (headless)**  
-  ```
-  bash
+  ```bash
   cargo test --no-default-features
   ```
   CI runs these on Linux/macOS/Windows and also checks the UI build path.
 
 - **Benchmarks** (Criterion with HTML reports)  
-  ```
-  bash
+  ```bash
   cargo bench
   # results under target/criterion
   ```
@@ -217,8 +208,7 @@ Stitch keeps per-project state in a `.stitchworkspace` folder (auto-excluded fro
 - `tokens` (default): enable accurate token counting with `tiktoken-rs`.
 
 Headless library/test builds:
-```
-bash
+```bash
 cargo build --no-default-features
 cargo test  --no-default-features
 ```
