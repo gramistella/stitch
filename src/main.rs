@@ -13,8 +13,9 @@ use slint::ComponentHandle;
 #[cfg(feature = "ui")]
 use ui::{
     AppState, AppWindow, Row, SelectFromTextDialog, apply_selection_from_text, on_check_updates,
-    on_copy_output, on_filter_changed, on_generate_output, on_select_folder, on_toggle_check,
-    on_toggle_expand, on_save_profile_as, on_select_profile, on_save_profile_current
+    on_copy_output, on_filter_changed, on_generate_output, on_save_profile_as,
+    on_save_profile_current, on_select_folder, on_select_profile, on_toggle_check,
+    on_toggle_expand,
 };
 
 #[cfg(feature = "ui")]
@@ -37,7 +38,9 @@ fn spawn_window(registry: Rc<RefCell<Vec<AppWindow>>>) -> anyhow::Result<()> {
     app.set_output_stats("0 chars • 0 tokens".into());
 
     // Profiles UI defaults
-    app.set_profiles(slint::ModelRc::new(slint::VecModel::from(Vec::<slint::SharedString>::new())));
+    app.set_profiles(slint::ModelRc::new(slint::VecModel::from(Vec::<
+        slint::SharedString,
+    >::new())));
     app.set_selected_profile_index(-1);
 
     let state = Rc::new(RefCell::new(AppState {
@@ -189,6 +192,25 @@ fn spawn_window(registry: Rc<RefCell<Vec<AppWindow>>>) -> anyhow::Result<()> {
         let registry_clone = Rc::clone(&registry);
         app.on_new_window(move || {
             let _ = spawn_window(Rc::clone(&registry_clone));
+        });
+    }
+
+    {
+        let app_weak = app.as_weak();
+        let state = Rc::clone(&state);
+        app.on_profile_name_changed(move || {
+            if let Some(app) = app_weak.upgrade() {
+                ui::on_profile_name_changed(&app, &state);
+            }
+        });
+    }
+    {
+        let app_weak = app.as_weak();
+        let state = Rc::clone(&state);
+        app.on_delete_profile(move || {
+            if let Some(app) = app_weak.upgrade() {
+                ui::on_delete_profile(&app, &state);
+            }
         });
     }
 

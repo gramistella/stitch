@@ -11,19 +11,47 @@ export struct Row {
     has_children: bool,
 }
 
+// In `ui/app.slint`, update the `LabeledEdit` component
 component LabeledEdit inherits VerticalBox {
     in property <string> label;
     in-out property <string> value;
+
+    // Exact layout controls
+    in property <length> gap: 12px;            // exact label ↔ input distance
+    in property <length> label-height: 16px;  // fixed label box height for consistency
+    in property <length> input-height: 30px;  // consistent input height
+
     callback changed();
 
-    spacing: 2px;                     // tight label↔field gap
-    Text { text: root.label; font-size: 12px; }
+    // No automatic spacing; we insert our own explicit spacer
+    spacing: 0px;
+    padding: 0px;
+
+    Text {
+        text: root.label;
+        font-size: 12px;
+        width: parent.width;
+        height: root.label-height;      // fixes variability from implicit line leading
+        horizontal-alignment: left;
+        vertical-alignment: bottom;     // seat the text at the bottom of its box
+        overflow: elide;
+    }
+
+    // The only gap between label and input — exactly root.gap
+    Rectangle {
+        width: 1px;
+        height: root.gap;
+        background: transparent;
+    }
+
     LineEdit {
-        height: 30px;
+        height: root.input-height;
+        width: parent.width;
         text <=> root.value;
         changed text => { root.changed(); }
     }
 }
+
 
 export component SelectFromTextDialog inherits Window {
     width: 520px;
@@ -117,9 +145,12 @@ export component AppWindow inherits Window {
     in-out property <[string]> output-lines;
     in-out property <string> output-stats;
 
-    // Profiles UI
     in-out property <[string]> profiles;
     in-out property <int> selected-profile-index;
+
+    // NEW: current profile name (used for rename) and Save enabled state
+    in-out property <string> profile-name;
+    in-out property <bool> save-enabled;
 
     in-out property <bool> show-copy-toast;
     in-out property <string> copy-toast-text;
@@ -133,10 +164,13 @@ export component AppWindow inherits Window {
     callback select-from-text();
     callback new-window();
 
-    // Profiles callbacks
     callback select-profile(index: int);
     callback save-profile();
     callback save-profile-as();
+
+    // NEW: rename/delete hooks
+    callback profile-name-changed();
+    callback delete-profile();
 
     VerticalBox {
         spacing: 10px;
@@ -201,75 +235,123 @@ export component AppWindow inherits Window {
         }
 
         HorizontalBox {
-            spacing: 12px;
 
+            // LEFT COLUMN (Profiles + Filters) — now scrollable
             VerticalBox {
-                            // Profiles: ComboBox + Save buttons
-                HorizontalBox {
-                    spacing: 6px;
-                    // ComboBox is in std-widgets.slint
+                // Profiles row
+                HorizontalBox {     
+                    spacing: 8px;   
+                    padding: 0px;     
                     
-                    ComboBox {
-                        width: 210px;
-
-                        // Two-way binding so programmatic changes reflect in the UI and vice versa
+                    if (root.selected-profile-index >= 0) : ComboBox {
+                        width: 180px;
+                        height: 30px;
                         current-index <=> root.selected-profile-index;
-
                         model: root.profiles;
-
-                        // When the user changes it, call into Rust with the current index
                         selected => {
                             root.select-profile(root.selected-profile-index);
                         }
+                        
                     }
-
-
-                    Button {
-                        visible: root.selected-profile-index > 0;
-                        text: "Save";
-                        height: 30px;
-                        clicked => { root.save-profile(); }
-                    }
-                    Button {
-                        visible: root.selected-profile-index >= 0;
+                    
+                    if (root.selected-profile-index >= 0) : Button {
                         text: "Save As…";
                         height: 30px;
                         clicked => { root.save-profile-as(); }
+                        
+                    }
+                    if (root.selected-profile-index > 0) : Button {
+                        visible: root.selected-profile-index > 0;
+                        text: "Delete";
+                        height: 30px;
+                        clicked => { root.delete-profile(); }
+                    }
+                
+                }
+
+                if (root.selected-profile-index > 0) : Button {
+                        visible: root.selected-profile-index > 0;
+                        enabled: root.save-enabled;
+                        text: "Save";
+                        height: 30px;
+                        clicked => { root.save-profile(); }
+                }
+                width: 370px;
+
+                // Filters (and Profile Name) as a scrollable list
+                Rectangle {
+                    border-width: 0px;
+                    horizontal-stretch: 1;
+                    vertical-stretch: 1;
+                    background: transparent;
+
+                    // clipping belongs on a Rectangle (not on ScrollView)
+                    clip: true;
+
+                    // Fill the clipping container
+                    ScrollView {
+                        width: parent.width;
+                        height: parent.height;
+
+                        // Viewport content must match the scroll area width exactly
+                        viewport := VerticalBox {
+                            spacing: 8px;
+                            padding: 0px;                 // remove default insets
+                            width: parent.width - 5px;          // lock to ScrollView width
+                            
+                        
+                            if (root.selected-profile-index > 0) : LabeledEdit {
+                                width: parent.width;                 // match viewport width exactly
+                                label: "Profile name:";
+                                value <=> root.profile-name;
+                                changed => { root.profile-name-changed(); }
+                            }
+
+                            if (root.selected-profile-index > 0) : Rectangle {
+                                width: parent.width;                 
+                                height: 30px;
+                            }
+                            LabeledEdit {
+                                width: parent.width;
+                                label: "Filter Extensions (e.g., .py,.txt or '-.rs')";
+                                value <=> root.ext-filter;
+                                changed => { root.filter-changed(); }
+                            }
+
+                            LabeledEdit {
+                                width: parent.width;
+                                label: "Exclude Directories (e.g., target,node_modules):";
+                                value <=> root.exclude-dirs;
+                                changed => { root.filter-changed(); }
+                            }
+
+                            LabeledEdit {
+                                width: parent.width;
+                                label: "Exclude Files (e.g., LICENSE):";
+                                value <=> root.exclude-files;
+                                changed => { root.filter-changed(); }
+                            }
+
+                            LabeledEdit {
+                                width: parent.width;
+                                label: "Remove lines starting with:";
+                                value <=> root.remove-prefix;
+                                changed => { root.filter-changed(); }
+                            }
+
+                            LabeledEdit {
+                                width: parent.width;
+                                label: "Remove regex:";
+                                value <=> root.remove-regex;
+                                changed => { root.filter-changed(); }
+                            }
+                        }
                     }
                 }
-                width: 360px;
-            
-                LabeledEdit {
-                    label: "Filter Extensions (e.g., .py,.txt or '-.rs')";
-                    value <=> root.ext-filter;
-                    changed => { root.filter-changed(); }
-                }
 
-                LabeledEdit {
-                    label: "Exclude Directories (e.g., target,node_modules):";
-                    value <=> root.exclude-dirs;
-                    changed => { root.filter-changed(); }
-                }
-
-                LabeledEdit {
-                    label: "Exclude Files (e.g., LICENSE):";
-                    value <=> root.exclude-files;
-                    changed => { root.filter-changed(); }
-                }
-
-                LabeledEdit {
-                    label: "Remove lines starting with:";
-                    value <=> root.remove-prefix;
-                    changed => { root.filter-changed(); }
-                }
-
-                LabeledEdit {
-                    label: "Remove regex:";
-                    value <=> root.remove-regex;
-                    changed => { root.filter-changed(); }
-                }
             }
 
+            // MIDDLE COLUMN (Tree)
             VerticalBox { 
                 horizontal-stretch: 1;
 
@@ -316,7 +398,6 @@ export component AppWindow inherits Window {
                                 }
 
                                 Text { 
-                                    
                                     height: parent.height;
                                     vertical-alignment: center;
                                     text: row.name;
@@ -327,6 +408,7 @@ export component AppWindow inherits Window {
                 }
             }
 
+            // RIGHT COLUMN (Output)
             VerticalBox {
                 padding-top: 24px;
                 spacing: 6px;
@@ -344,21 +426,16 @@ export component AppWindow inherits Window {
 
                     TextEdit {
                         text <=> root.output-text;
-                        
                         read-only: true;
                         wrap: no-wrap;
-
                         x: 0; y: 0;
                         width: parent.width;
                         height: parent.height;
                         has-focus: false;
                         font-size: 11px;
-
                     }
                 }
-            
             }
-
         }
     }
 }

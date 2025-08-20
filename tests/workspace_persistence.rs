@@ -36,6 +36,7 @@ fn save_then_load_roundtrip_and_overwrite_is_atomic() {
         remove_regex: "\"\"\"(?m)^\\s*TODO:.*$\"\"\"".into(),
         hierarchy_only: false,
         dirs_only: false,
+        current_profile: None,
     };
     save_workspace(root, &s1).expect("save v1");
 
@@ -52,6 +53,7 @@ fn save_then_load_roundtrip_and_overwrite_is_atomic() {
     assert_eq!(loaded1.remove_regex, s1.remove_regex);
     assert_eq!(loaded1.hierarchy_only, s1.hierarchy_only);
     assert_eq!(loaded1.dirs_only, s1.dirs_only);
+    assert_eq!(loaded1.current_profile, None);
 
     // Overwrite with different settings
     let mut s2 = loaded1.clone();

@@ -31,7 +31,7 @@ pub enum ProfileScope {
     Local,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct ProfileSelection {
     /// Project-relative path using forward slashes.
     pub path: String,
@@ -134,11 +134,7 @@ pub fn save_workspace(project_root: &Path, settings: &WorkspaceSettings) -> io::
 
 /* =============================== Profiles IO =============================== */
 
-pub fn save_profile(
-    project_root: &Path,
-    profile: &Profile,
-    scope: ProfileScope,
-) -> io::Result<()> {
+pub fn save_profile(project_root: &Path, profile: &Profile, scope: ProfileScope) -> io::Result<()> {
     ensure_profiles_dirs(project_root)?;
     let path = profile_path(project_root, scope, &profile.name);
     let tmp = path.with_extension("tmp");
@@ -151,18 +147,27 @@ pub fn save_profile(
 /// Returns (Profile, Scope) preferring Local if both exist.
 pub fn load_profile(project_root: &Path, name: &str) -> Option<(Profile, ProfileScope)> {
     let local = profile_path(project_root, ProfileScope::Local, name);
-    if let Ok(bytes) = fs::read(&local) {
-        if let Ok(p) = serde_json::from_slice::<Profile>(&bytes) {
-            return Some((p, ProfileScope::Local));
-        }
+    if let Ok(bytes) = fs::read(&local)
+        && let Ok(p) = serde_json::from_slice::<Profile>(&bytes)
+    {
+        return Some((p, ProfileScope::Local));
     }
     let shared = profile_path(project_root, ProfileScope::Shared, name);
-    if let Ok(bytes) = fs::read(&shared) {
-        if let Ok(p) = serde_json::from_slice::<Profile>(&bytes) {
-            return Some((p, ProfileScope::Shared));
-        }
+    if let Ok(bytes) = fs::read(&shared)
+        && let Ok(p) = serde_json::from_slice::<Profile>(&bytes)
+    {
+        return Some((p, ProfileScope::Shared));
     }
     None
+}
+
+pub fn delete_profile(project_root: &Path, scope: ProfileScope, name: &str) -> io::Result<()> {
+    let path = profile_path(project_root, scope, name);
+    if path.exists() {
+        // Best effort delete; ignore if it fails
+        let _ = fs::remove_file(&path);
+    }
+    Ok(())
 }
 
 /// Lists all profiles found. If a name exists in both scopes, only the Local one is returned.
@@ -170,21 +175,28 @@ pub fn list_profiles(project_root: &Path) -> Vec<ProfileMeta> {
     fn scan(dir: &Path, scope: ProfileScope, out: &mut Vec<(String, ProfileScope)>) {
         if let Ok(rd) = fs::read_dir(dir) {
             for ent in rd.flatten() {
-                if let Some(ext) = ent.path().extension() {
-                    if ext == "json" {
-                        if let Some(os) = ent.path().file_stem() {
-                            let name = os.to_string_lossy().to_string();
-                            out.push((name, scope));
-                        }
-                    }
+                if let Some(ext) = ent.path().extension()
+                    && ext == "json"
+                    && let Some(os) = ent.path().file_stem()
+                {
+                    let name = os.to_string_lossy().to_string();
+                    out.push((name, scope));
                 }
             }
         }
     }
 
     let mut raw: Vec<(String, ProfileScope)> = Vec::new();
-    scan(&profiles_shared_dir(project_root), ProfileScope::Shared, &mut raw);
-    scan(&profiles_local_dir(project_root), ProfileScope::Local, &mut raw);
+    scan(
+        &profiles_shared_dir(project_root),
+        ProfileScope::Shared,
+        &mut raw,
+    );
+    scan(
+        &profiles_local_dir(project_root),
+        ProfileScope::Local,
+        &mut raw,
+    );
 
     // keep a single entry per name, preferring Local
     use std::collections::BTreeMap;
