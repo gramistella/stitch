@@ -857,21 +857,20 @@ fn capture_profile_from_ui(app: &AppWindow, state: &SharedState, name: &str) -> 
         current_profile: Some(name.to_string()),
     };
 
-    // convert explicit_states to project-relative unix paths
+    // NOTE: Preserve root selection by storing an empty relative path ("")
+    // when the explicit key equals the project root.
     let explicit = {
         let s = state.borrow();
         s.explicit_states
             .iter()
             .filter_map(|(abs, &st)| {
                 if let Ok(rel) = abs.strip_prefix(&dir) {
-                    if !rel.as_os_str().is_empty() {
-                        Some(stitch::core::ProfileSelection {
-                            path: path_to_unix(rel),
-                            state: st,
-                        })
+                    let path = if rel.as_os_str().is_empty() {
+                        String::new() // represents project root selected
                     } else {
-                        None
-                    }
+                        path_to_unix(rel)
+                    };
+                    Some(stitch::core::ProfileSelection { path, state: st })
                 } else {
                     None
                 }
@@ -895,7 +894,6 @@ fn apply_profile_to_ui(app: &AppWindow, state: &SharedState, profile: &Profile) 
     app.set_hierarchy_only(profile.settings.hierarchy_only);
     app.set_dirs_only(profile.settings.dirs_only);
 
-    // Show the name in the UI
     app.set_profile_name(profile.name.clone().into());
 
     parse_filters_from_ui(app, state);
@@ -905,22 +903,23 @@ fn apply_profile_to_ui(app: &AppWindow, state: &SharedState, profile: &Profile) 
         let mut s = state.borrow_mut();
         s.explicit_states.clear();
         if let Some(root) = base.as_ref() {
+            let sep = std::path::MAIN_SEPARATOR.to_string();
             for sel in &profile.explicit {
-                let abs = root.join(
-                    sel.path
-                        .replace('/', std::path::MAIN_SEPARATOR.to_string().as_str()),
-                );
+                let abs = if sel.path.is_empty() {
+                    // Empty relative path means: project root itself.
+                    root.clone()
+                } else {
+                    root.join(sel.path.replace('/', sep.as_str()))
+                };
                 s.explicit_states.insert(abs, sel.state);
             }
         }
-        // Baseline = loaded profile (exact snapshot for dirty checks)
         s.profile_baseline = Some(profile.clone());
     }
 
     rebuild_tree_and_ui(app, state);
     on_generate_output(app, state);
 
-    // Freshly loaded: no unsaved changes
     app.set_save_enabled(false);
 }
 
