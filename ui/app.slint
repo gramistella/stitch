@@ -209,6 +209,7 @@ component ProfilesPanel inherits VerticalBox {
     callback delete-profile();
     callback profile-name-changed();
     callback filter-changed();
+    callback discard-changes();
 
     width: 370px;
 
@@ -241,12 +242,24 @@ component ProfilesPanel inherits VerticalBox {
         }
     }
 
-    if (root.selected-profile-index >= 0) : Button {
-        enabled: root.save-enabled;
-        text:  (root.selected-profile-index > 0) ? "Save" : "Save Workspace Settings";
-        height: 30px;
-        clicked => { root.save-profile(); }
+    HorizontalBox {
+        spacing: 8px;
+        padding: 0px;
+
+        if (root.selected-profile-index >= 0) : Button {
+            enabled: root.save-enabled;
+            text:  (root.selected-profile-index > 0) ? "Save" : "Save Workspace Settings";
+            height: 30px;
+            clicked => { root.save-profile(); }
+        }
+
+        if (root.selected-profile-index >= 0 && root.save-enabled) : Button {
+            text: "Discard Changes";
+            height: 30px;
+            clicked => { root.discard-changes(); }
+        }
     }
+
 
     // Filters (and Profile Name) as a scrollable list
     Rectangle {
@@ -462,6 +475,7 @@ export component AppWindow inherits Window {
     // rename/delete hooks
     callback profile-name-changed();
     callback delete-profile();
+    callback discard-changes();
 
     VerticalBox {
         spacing: 10px;
@@ -502,6 +516,7 @@ export component AppWindow inherits Window {
                 delete-profile => { root.delete-profile(); }
                 profile-name-changed => { root.profile-name-changed(); }
                 filter-changed => { root.filter-changed(); }
+                discard-changes => { root.discard-changes(); }
             }
 
             // MIDDLE: Tree

@@ -212,7 +212,15 @@ fn spawn_window(registry: Rc<RefCell<Vec<AppWindow>>>) -> anyhow::Result<()> {
             }
         });
     }
-
+    {
+        let app_weak = app.as_weak();
+        let state = Rc::clone(&state);
+        app.on_discard_changes(move || {
+            if let Some(app) = app_weak.upgrade() {
+                ui::on_discard_changes(&app, &state);
+            }
+        });
+    }
     app.show()?;
     registry.borrow_mut().push(app);
 

@@ -1279,6 +1279,77 @@ pub fn on_delete_profile(app: &AppWindow, state: &SharedState) {
     on_generate_output(app, state);
 }
 
+pub fn on_discard_changes(app: &AppWindow, state: &SharedState) {
+    let idx = app.get_selected_profile_index();
+    if idx < 0 {
+        return;
+    }
+
+    // Workspace mode: restore workspace_baseline and clear selections
+    if idx == 0 {
+        let ws_opt = {
+            let s = state.borrow();
+            s.workspace_baseline.clone()
+        }
+        .or_else(|| {
+            let dir_opt = { state.borrow().selected_directory.clone() };
+            dir_opt.and_then(|d| load_workspace(&d))
+        });
+
+        if let Some(ws) = ws_opt {
+            app.set_ext_filter(ws.ext_filter.clone().into());
+            app.set_exclude_dirs(ws.exclude_dirs.clone().into());
+            app.set_exclude_files(ws.exclude_files.clone().into());
+            app.set_remove_prefix(ws.remove_prefix.clone().into());
+            app.set_remove_regex(ws.remove_regex.clone().into());
+            app.set_hierarchy_only(ws.hierarchy_only);
+            app.set_dirs_only(ws.dirs_only);
+
+            parse_filters_from_ui(app, state);
+
+            {
+                let mut s = state.borrow_mut();
+                s.explicit_states.clear();
+                s.profile_baseline = None;
+                s.workspace_baseline = Some(ws);
+            }
+
+            rebuild_tree_and_ui(app, state);
+            on_generate_output(app, state);
+            app.set_save_enabled(false);
+        }
+        return;
+    }
+
+    // Profile mode: re-apply profile_baseline (or reload from disk as fallback)
+    if let Some(baseline) = { state.borrow().profile_baseline.clone() } {
+        apply_profile_to_ui(app, state, &baseline);
+        app.set_save_enabled(false);
+        return;
+    }
+
+    // Fallback: load from disk if baseline isn't present
+    let (name_opt, root_opt) = {
+        let s = state.borrow();
+        let name = s
+            .profiles
+            .get((idx as usize).saturating_sub(1))
+            .map(|m| m.name.clone());
+        (name, s.selected_directory.clone())
+    };
+
+    if let (Some(name), Some(root)) = (name_opt, root_opt) {
+        if let Some((profile, _scope)) = load_profile(&root, &name) {
+            {
+                let mut s = state.borrow_mut();
+                s.profile_baseline = Some(profile.clone());
+            }
+            apply_profile_to_ui(app, state, &profile);
+            app.set_save_enabled(false);
+        }
+    }
+}
+
 fn workspace_settings_equal(a: &WorkspaceSettings, b: &WorkspaceSettings) -> bool {
     a.version == b.version
         && a.ext_filter == b.ext_filter
