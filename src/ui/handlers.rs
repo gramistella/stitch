@@ -1330,15 +1330,15 @@ pub fn on_discard_changes(app: &AppWindow, state: &SharedState) {
         (name, s.selected_directory.clone())
     };
 
-    if let (Some(name), Some(root)) = (name_opt, root_opt) {
-        if let Some((profile, _scope)) = load_profile(&root, &name) {
-            {
-                let mut s = state.borrow_mut();
-                s.profile_baseline = Some(profile.clone());
-            }
-            apply_profile_to_ui(app, state, &profile);
-            app.set_save_enabled(false);
+    if let (Some(name), Some(root)) = (name_opt, root_opt)
+        && let Some((profile, _scope)) = load_profile(&root, &name)
+    {
+        {
+            let mut s = state.borrow_mut();
+            s.profile_baseline = Some(profile.clone());
         }
+        apply_profile_to_ui(app, state, &profile);
+        app.set_save_enabled(false);
     }
 }
 

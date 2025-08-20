@@ -10,5 +10,4 @@ pub use handlers::{
     on_toggle_check, on_toggle_expand,
 };
 
-
 pub use state::AppState;
