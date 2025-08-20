@@ -120,18 +120,311 @@ export component SaveProfileDialog inherits Window {
     }
 }
 
+component TopBar inherits HorizontalBox {
+    in-out property <bool> hierarchy-only;
+    in-out property <bool> dirs-only;
+    in property <string> last-refresh;
+    in property <bool> show-copy-toast;
+    in property <string> copy-toast-text;
 
-// In `ui/app.slint`, update the `AppWindow` component (complete component)
+    callback select-folder();
+    callback new-window();
+    callback generate-output();
+    callback copy-output();
+
+    spacing: 8px;
+
+    Rectangle { 
+        horizontal-stretch: 1;
+        width: 180px;
+        Button {
+            horizontal-stretch: 1;
+            text: "Select Folder";
+            width: 110px;
+            height: 30px;
+            clicked => { root.select-folder(); }
+        }
+    }
+
+    Button {
+        text: "New Window";
+        clicked => { root.new-window(); }
+    }
+
+    Rectangle { horizontal-stretch: 1; background: transparent; }
+
+    CheckBox { text: "Hierarchy Only";  checked <=> root.hierarchy-only;  height: 30px; width: 150px;  horizontal-stretch: 1;}
+    CheckBox { text: "Directories Only"; checked <=> root.dirs-only;      height: 30px; width: 160px;  horizontal-stretch: 1; }
+
+    Rectangle {
+        horizontal-stretch: 1;
+        width: 290px;
+        height: 30px;
+        background: transparent;
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: root.last-refresh;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+
+    Button {
+        text: "Generate Output";
+        clicked => { root.generate-output(); }
+    }
+
+    Button {
+        text: "Copy Output";
+        clicked => { root.copy-output(); }
+    }
+
+    Text {
+        visible: root.show-copy-toast;
+        text: root.copy-toast-text;
+        color: #2b8a3e;
+        font-weight: 10;
+    }
+}
+
+component ProfilesPanel inherits VerticalBox {
+    // Profile state
+    in-out property <[string]> profiles;
+    in-out property <int> selected-profile-index;
+    in-out property <string> profile-name;
+    in-out property <bool> save-enabled;
+
+    // Filter fields
+    in-out property <string> ext-filter;
+    in-out property <string> exclude-dirs;
+    in-out property <string> exclude-files;
+    in-out property <string> remove-prefix;
+    in-out property <string> remove-regex;
+
+    // Notifications upward
+    callback select-profile(index: int);
+    callback save-profile();
+    callback save-profile-as();
+    callback delete-profile();
+    callback profile-name-changed();
+    callback filter-changed();
+
+    width: 370px;
+
+    // Profiles row
+    HorizontalBox {
+        spacing: 8px;
+        padding: 0px;
+
+        if (root.selected-profile-index >= 0) : ComboBox {
+            width: 180px;
+            height: 30px;
+            current-index <=> root.selected-profile-index;
+            model: root.profiles;
+            selected => {
+                root.select-profile(root.selected-profile-index);
+            }
+        }
+
+        if (root.selected-profile-index >= 0) : Button {
+            text: "Save As…";
+            height: 30px;
+            clicked => { root.save-profile-as(); }
+        }
+
+        if (root.selected-profile-index > 0) : Button {
+            visible: root.selected-profile-index > 0;
+            text: "Delete";
+            height: 30px;
+            clicked => { root.delete-profile(); }
+        }
+    }
+
+    if (root.selected-profile-index >= 0) : Button {
+        enabled: root.save-enabled;
+        text:  (root.selected-profile-index > 0) ? "Save" : "Save Workspace Settings";
+        height: 30px;
+        clicked => { root.save-profile(); }
+    }
+
+    // Filters (and Profile Name) as a scrollable list
+    Rectangle {
+        border-width: 0px;
+        horizontal-stretch: 1;
+        vertical-stretch: 1;
+        background: transparent;
+
+        // clipping belongs on a Rectangle (not on ScrollView)
+        clip: true;
+
+        // Fill the clipping container
+        ScrollView {
+            width: parent.width;
+            height: parent.height;
+
+            // Viewport content must match the scroll area width exactly
+            viewport := VerticalBox {
+                spacing: 8px;
+                padding: 0px;                 // remove default insets
+                width: parent.width - 5px;     // lock to ScrollView width
+
+                if (root.selected-profile-index > 0) : LabeledEdit {
+                    width: parent.width;                 // match viewport width exactly
+                    label: "Profile name:";
+                    value <=> root.profile-name;
+                    changed => { root.profile-name-changed(); }
+                }
+
+                if (root.selected-profile-index > 0) : Rectangle {
+                    width: parent.width;
+                    height: 30px;
+                }
+
+                LabeledEdit {
+                    width: parent.width;
+                    label: "Filter Extensions (e.g., .py,.txt or '-.rs')";
+                    value <=> root.ext-filter;
+                    changed => { root.filter-changed(); }
+                }
+
+                LabeledEdit {
+                    width: parent.width;
+                    label: "Exclude Directories (e.g., target,node_modules):";
+                    value <=> root.exclude-dirs;
+                    changed => { root.filter-changed(); }
+                }
+
+                LabeledEdit {
+                    width: parent.width;
+                    label: "Exclude Files (e.g., LICENSE):";
+                    value <=> root.exclude-files;
+                    changed => { root.filter-changed(); }
+                }
+
+                LabeledEdit {
+                    width: parent.width;
+                    label: "Remove lines starting with:";
+                    value <=> root.remove-prefix;
+                    changed => { root.filter-changed(); }
+                }
+
+                LabeledEdit {
+                    width: parent.width;
+                    label: "Remove regex:";
+                    value <=> root.remove-regex;
+                    changed => { root.filter-changed(); }
+                }
+            }
+        }
+    }
+}
+
+component TreePanel inherits VerticalBox {
+    in-out property <[Row]> tree-model;
+
+    callback select-from-text();
+    callback toggle-expand(index: int);
+    callback toggle-check(index: int);
+
+    horizontal-stretch: 1;
+
+    Button {
+        text: "Select from Text...";
+        clicked => { root.select-from-text(); }
+    }
+
+    Rectangle {
+        horizontal-stretch: 1;
+        border-width: 1px;
+        border-radius: 4px;
+        border-color: Palette.border;
+        background: Palette.alternate-background.darker(0.06);
+
+        ScrollView {
+            viewport1 := VerticalBox {
+                spacing: 0px;
+                padding: 0px;
+                padding-bottom: 15px;
+
+                for row[i] in root.tree-model : HorizontalBox {
+                    spacing: 8px;
+                    height: 35px;
+
+                    Rectangle { width: max(0px, row.level * 16px); height: 1px; background: transparent; }
+
+                    Rectangle {
+                        width: 18px; height: parent.height; background: transparent;
+                        TouchArea {
+                            clicked => { if (row.is_dir && row.has_children) { root.toggle-expand(i); } }
+                            Text {
+                                font-size: 21px;
+                                vertical-alignment: center;
+                                horizontal-alignment: center;
+                                text: row.is_dir ? (row.has_children ? (row.expanded ? "▾" : "▸") : "·") : " ";
+                            }
+                        }
+                    }
+
+                    CheckBox {
+                        height: parent.height;
+                        checked: row.checked;
+                        toggled => { root.toggle-check(i); }
+                    }
+
+                    Text { 
+                        height: parent.height;
+                        vertical-alignment: center;
+                        text: row.name;
+                    }
+                }
+            }
+        }
+    }
+}
+
+component OutputPanel inherits VerticalBox {
+    in-out property <string> output-text;
+    in property <string> output-stats;
+
+    padding-top: 24px;
+    spacing: 6px;
+
+    Text { text: "Output: " + root.output-stats; }
+
+    Rectangle {
+        border-width: 1px;
+        border-radius: 4px;
+        clip: true;
+        horizontal-stretch: 1;
+        vertical-stretch: 1;
+        border-color: Palette.border;
+        background: Palette.alternate-background.darker(0.06); 
+
+        TextEdit {
+            text <=> root.output-text;
+            read-only: true;
+            wrap: no-wrap;
+            x: 0; y: 0;
+            width: parent.width;
+            height: parent.height;
+            has-focus: false;
+            font-size: 11px;
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     width: 1300px;
     height: 650px;
-    
-    default-font-family: "JetBrains Mono";
 
+    default-font-family: "JetBrains Mono";
     icon: @image-url("assets/icon.png");
+
     in-out property <string> app-version;
     title: "Stitch v" + root.app-version;
-    
+
     in-out property <[Row]> tree-model;
     in-out property <string> ext-filter;
     in-out property <string> exclude-dirs;
@@ -148,13 +441,12 @@ export component AppWindow inherits Window {
     in-out property <[string]> profiles;
     in-out property <int> selected-profile-index;
 
-    // NEW: current profile name (used for rename) and Save enabled state
     in-out property <string> profile-name;
     in-out property <bool> save-enabled;
 
     in-out property <bool> show-copy-toast;
     in-out property <string> copy-toast-text;
-    
+
     callback select-folder();
     callback filter-changed();
     callback toggle-expand(index: int);
@@ -168,273 +460,66 @@ export component AppWindow inherits Window {
     callback save-profile();
     callback save-profile-as();
 
-    // NEW: rename/delete hooks
+    // rename/delete hooks
     callback profile-name-changed();
     callback delete-profile();
 
     VerticalBox {
         spacing: 10px;
 
-        HorizontalBox {
-            spacing: 8px;
+        // Top bar
+        TopBar {
+            hierarchy-only <=> root.hierarchy-only;
+            dirs-only <=> root.dirs-only;
+            last-refresh: root.last-refresh;
+            show-copy-toast: root.show-copy-toast;
+            copy-toast-text: root.copy-toast-text;
 
-            Rectangle { 
-                horizontal-stretch: 1;
-                width: 180px;
-                Button {
-                    horizontal-stretch: 1;
-                    text: "Select Folder";
-                    
-                    width: 110px;
-                    height: 30px;
-                    clicked => { root.select-folder(); }
-                }
-            }
-
-            Button {
-                text: "New Window";
-                clicked => { root.new-window(); }
-            }
-
-            Rectangle { horizontal-stretch: 1; background: transparent; }
-
-            CheckBox { text: "Hierarchy Only";  checked <=> root.hierarchy-only;  height: 30px; width: 150px;  horizontal-stretch: 1;}
-            CheckBox { text: "Directories Only"; checked <=> root.dirs-only;      height: 30px; width: 160px;  horizontal-stretch: 1; }
-
-            Rectangle {
-                horizontal-stretch: 1;
-                width: 290px;
-                height: 30px;
-                background: transparent;
-                Text {
-                    width: parent.width;
-                    height: parent.height;
-                    text: root.last-refresh;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-            }
-
-            Button {
-                text: "Generate Output";
-                clicked => { root.generate-output(); }
-            }
-
-            Button {
-                text: "Copy Output";
-                clicked => { root.copy-output(); }
-            }
-
-            Text {
-                visible: root.show-copy-toast;
-                text: root.copy-toast-text;
-                color: #2b8a3e;
-                font-weight: 10;
-            }
+            select-folder => { root.select-folder(); }
+            new-window => { root.new-window(); }
+            generate-output => { root.generate-output(); }
+            copy-output => { root.copy-output(); }
         }
 
+        // Main content row
         HorizontalBox {
+            // LEFT: Profiles & Filters
+            ProfilesPanel {
+                profiles <=> root.profiles;
+                selected-profile-index <=> root.selected-profile-index;
 
-            // LEFT COLUMN (Profiles + Filters) — now scrollable
-            VerticalBox {
-                // Profiles row
-                HorizontalBox {     
-                    spacing: 8px;   
-                    padding: 0px;     
-                    
-                    if (root.selected-profile-index >= 0) : ComboBox {
-                        width: 180px;
-                        height: 30px;
-                        current-index <=> root.selected-profile-index;
-                        model: root.profiles;
-                        selected => {
-                            root.select-profile(root.selected-profile-index);
-                        }
-                        
-                    }
-                    
-                    if (root.selected-profile-index >= 0) : Button {
-                        text: "Save As…";
-                        height: 30px;
-                        clicked => { root.save-profile-as(); }
-                        
-                    }
-                    if (root.selected-profile-index > 0) : Button {
-                        visible: root.selected-profile-index > 0;
-                        text: "Delete";
-                        height: 30px;
-                        clicked => { root.delete-profile(); }
-                    }
-                
-                }
+                profile-name <=> root.profile-name;
+                save-enabled <=> root.save-enabled;
 
-                if (root.selected-profile-index > 0) : Button {
-                        visible: root.selected-profile-index > 0;
-                        enabled: root.save-enabled;
-                        text: "Save";
-                        height: 30px;
-                        clicked => { root.save-profile(); }
-                }
-                width: 370px;
+                ext-filter <=> root.ext-filter;
+                exclude-dirs <=> root.exclude-dirs;
+                exclude-files <=> root.exclude-files;
+                remove-prefix <=> root.remove-prefix;
+                remove-regex <=> root.remove-regex;
 
-                // Filters (and Profile Name) as a scrollable list
-                Rectangle {
-                    border-width: 0px;
-                    horizontal-stretch: 1;
-                    vertical-stretch: 1;
-                    background: transparent;
-
-                    // clipping belongs on a Rectangle (not on ScrollView)
-                    clip: true;
-
-                    // Fill the clipping container
-                    ScrollView {
-                        width: parent.width;
-                        height: parent.height;
-
-                        // Viewport content must match the scroll area width exactly
-                        viewport := VerticalBox {
-                            spacing: 8px;
-                            padding: 0px;                 // remove default insets
-                            width: parent.width - 5px;          // lock to ScrollView width
-                            
-                        
-                            if (root.selected-profile-index > 0) : LabeledEdit {
-                                width: parent.width;                 // match viewport width exactly
-                                label: "Profile name:";
-                                value <=> root.profile-name;
-                                changed => { root.profile-name-changed(); }
-                            }
-
-                            if (root.selected-profile-index > 0) : Rectangle {
-                                width: parent.width;                 
-                                height: 30px;
-                            }
-                            LabeledEdit {
-                                width: parent.width;
-                                label: "Filter Extensions (e.g., .py,.txt or '-.rs')";
-                                value <=> root.ext-filter;
-                                changed => { root.filter-changed(); }
-                            }
-
-                            LabeledEdit {
-                                width: parent.width;
-                                label: "Exclude Directories (e.g., target,node_modules):";
-                                value <=> root.exclude-dirs;
-                                changed => { root.filter-changed(); }
-                            }
-
-                            LabeledEdit {
-                                width: parent.width;
-                                label: "Exclude Files (e.g., LICENSE):";
-                                value <=> root.exclude-files;
-                                changed => { root.filter-changed(); }
-                            }
-
-                            LabeledEdit {
-                                width: parent.width;
-                                label: "Remove lines starting with:";
-                                value <=> root.remove-prefix;
-                                changed => { root.filter-changed(); }
-                            }
-
-                            LabeledEdit {
-                                width: parent.width;
-                                label: "Remove regex:";
-                                value <=> root.remove-regex;
-                                changed => { root.filter-changed(); }
-                            }
-                        }
-                    }
-                }
-
+                select-profile(index) => { root.select-profile(index); }
+                save-profile => { root.save-profile(); }
+                save-profile-as => { root.save-profile-as(); }
+                delete-profile => { root.delete-profile(); }
+                profile-name-changed => { root.profile-name-changed(); }
+                filter-changed => { root.filter-changed(); }
             }
 
-            // MIDDLE COLUMN (Tree)
-            VerticalBox { 
+            // MIDDLE: Tree
+            TreePanel {
                 horizontal-stretch: 1;
+                tree-model <=> root.tree-model;
 
-                Button {
-                    text: "Select from Text...";
-                    clicked => { root.select-from-text(); }
-                }
-
-                Rectangle {
-                    horizontal-stretch: 1;
-                    border-width: 1px;
-                    border-radius: 4px;
-                    border-color: Palette.border;
-                    background: Palette.alternate-background.darker(0.06);
-                    ScrollView {
-                        viewport1 := VerticalBox {
-                            spacing: 0px;
-                            padding: 0px;
-                            padding-bottom: 15px;
-
-                            for row[i] in root.tree-model : HorizontalBox {
-                                spacing: 8px;
-                                height: 35px;
-
-                                Rectangle { width: max(0px, row.level * 16px); height: 1px; background: transparent; }
-
-                                Rectangle {
-                                    width: 18px; height: parent.height; background: transparent;
-                                    TouchArea {
-                                        clicked => { if (row.is_dir && row.has_children) { root.toggle-expand(i); } }
-                                        Text {
-                                            font-size: 21px;
-                                            vertical-alignment: center;
-                                            horizontal-alignment: center;
-                                            text: row.is_dir ? (row.has_children ? (row.expanded ? "▾" : "▸") : "·") : " ";
-                                        }
-                                    }
-                                }
-
-                                CheckBox {
-                                    height: parent.height;
-                                    checked: row.checked;
-                                    toggled => { root.toggle-check(i); }
-                                }
-
-                                Text { 
-                                    height: parent.height;
-                                    vertical-alignment: center;
-                                    text: row.name;
-                                }
-                            }
-                        }
-                    }
-                }
+                select-from-text => { root.select-from-text(); }
+                toggle-expand(index) => { root.toggle-expand(index); }
+                toggle-check(index) => { root.toggle-check(index); }
             }
 
-            // RIGHT COLUMN (Output)
-            VerticalBox {
-                padding-top: 24px;
-                spacing: 6px;
+            // RIGHT: Output
+            OutputPanel {
                 horizontal-stretch: 2;
-                Text { text: "Output: " + root.output-stats; }
-
-                Rectangle {
-                    border-width: 1px;
-                    border-radius: 4px;
-                    clip: true;
-                    horizontal-stretch: 1;
-                    vertical-stretch: 1;
-                    border-color: Palette.border;
-                    background: Palette.alternate-background.darker(0.06); 
-
-                    TextEdit {
-                        text <=> root.output-text;
-                        read-only: true;
-                        wrap: no-wrap;
-                        x: 0; y: 0;
-                        width: parent.width;
-                        height: parent.height;
-                        has-focus: false;
-                        font-size: 11px;
-                    }
-                }
+                output-text <=> root.output-text;
+                output-stats: root.output-stats;
             }
         }
     }

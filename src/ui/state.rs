@@ -37,6 +37,8 @@ pub struct AppState {
     /// The "Save As…" dialog instance, if shown.
     pub save_profile_dialog: Option<crate::ui::SaveProfileDialog>,
     pub profile_baseline: Option<stitch::core::Profile>,
+
+    pub workspace_baseline: Option<stitch::core::WorkspaceSettings>,
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;

@@ -172,21 +172,50 @@ pub fn delete_profile(project_root: &Path, scope: ProfileScope, name: &str) -> i
 
 /// Lists all profiles found. If a name exists in both scopes, only the Local one is returned.
 pub fn list_profiles(project_root: &Path) -> Vec<ProfileMeta> {
-    fn scan(dir: &Path, scope: ProfileScope, out: &mut Vec<(String, ProfileScope)>) {
+    // Scan a directory for *.json profiles and capture (display_name, scope, timestamp-key)
+    // Display name comes from the Profile JSON's `name` field (unsanitized),
+    // so symbols like parentheses are preserved in the UI.
+    fn scan(dir: &Path, scope: ProfileScope, out: &mut Vec<(String, ProfileScope, u128)>) {
         if let Ok(rd) = fs::read_dir(dir) {
             for ent in rd.flatten() {
-                if let Some(ext) = ent.path().extension()
-                    && ext == "json"
-                    && let Some(os) = ent.path().file_stem()
-                {
-                    let name = os.to_string_lossy().to_string();
-                    out.push((name, scope));
+                let path = ent.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                    continue;
                 }
+
+                // Prefer creation time; fall back to modified time; otherwise 0.
+                let ts_key: u128 = fs::metadata(&path)
+                    .ok()
+                    .and_then(|m| {
+                        m.created()
+                            .or_else(|_| m.modified())
+                            .ok()
+                            .map(|t| {
+                                t.duration_since(std::time::UNIX_EPOCH)
+                                    .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+                                    .as_micros()
+                            })
+                    })
+                    .unwrap_or(0);
+
+                // Read display name from file contents; fallback to file stem if parse fails.
+                let display_name = match fs::read(&path)
+                    .ok()
+                    .and_then(|bytes| serde_json::from_slice::<Profile>(&bytes).ok())
+                {
+                    Some(p) if !p.name.trim().is_empty() => p.name,
+                    _ => path
+                        .file_stem()
+                        .map(|os| os.to_string_lossy().to_string())
+                        .unwrap_or_else(|| "unnamed".to_string()),
+                };
+
+                out.push((display_name, scope, ts_key));
             }
         }
     }
 
-    let mut raw: Vec<(String, ProfileScope)> = Vec::new();
+    let mut raw: Vec<(String, ProfileScope, u128)> = Vec::new();
     scan(
         &profiles_shared_dir(project_root),
         ProfileScope::Shared,
@@ -198,24 +227,36 @@ pub fn list_profiles(project_root: &Path) -> Vec<ProfileMeta> {
         &mut raw,
     );
 
-    // keep a single entry per name, preferring Local
+    // Deduplicate by *display name*, prefer Local over Shared, and for same scope prefer newest ts.
     use std::collections::BTreeMap;
-    let mut by_name: BTreeMap<String, ProfileScope> = BTreeMap::new();
-    for (n, s) in raw {
-        match by_name.get(&n) {
+    let mut by_name: BTreeMap<String, (ProfileScope, u128)> = BTreeMap::new();
+    for (name, scope, ts) in raw {
+        match by_name.get(&name) {
             None => {
-                by_name.insert(n, s);
+                by_name.insert(name, (scope, ts));
             }
-            Some(prev) => {
-                if *prev == ProfileScope::Shared && s == ProfileScope::Local {
-                    by_name.insert(n, s);
+            Some(&(prev_scope, prev_ts)) => {
+                let should_replace =
+                    (prev_scope == ProfileScope::Shared && scope == ProfileScope::Local)
+                        || (prev_scope == scope && ts > prev_ts);
+                if should_replace {
+                    by_name.insert(name, (scope, ts));
                 }
             }
         }
     }
 
-    by_name
+    // Sort by timestamp (newest first) and return.
+    let mut merged: Vec<(String, ProfileScope, u128)> = by_name
         .into_iter()
-        .map(|(name, scope)| ProfileMeta { name, scope })
+        .map(|(name, (scope, ts))| (name, scope, ts))
+        .collect();
+    merged.sort_by(|a, b| b.2.cmp(&a.2));
+
+    merged
+        .into_iter()
+        .map(|(name, scope, _)| ProfileMeta { name, scope })
         .collect()
 }
+
+
