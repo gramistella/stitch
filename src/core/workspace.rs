@@ -187,14 +187,11 @@ pub fn list_profiles(project_root: &Path) -> Vec<ProfileMeta> {
                 let ts_key: u128 = fs::metadata(&path)
                     .ok()
                     .and_then(|m| {
-                        m.created()
-                            .or_else(|_| m.modified())
-                            .ok()
-                            .map(|t| {
-                                t.duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap_or_else(|_| std::time::Duration::from_secs(0))
-                                    .as_micros()
-                            })
+                        m.created().or_else(|_| m.modified()).ok().map(|t| {
+                            t.duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_else(|_| std::time::Duration::from_secs(0))
+                                .as_micros()
+                        })
                     })
                     .unwrap_or(0);
 
@@ -236,9 +233,9 @@ pub fn list_profiles(project_root: &Path) -> Vec<ProfileMeta> {
                 by_name.insert(name, (scope, ts));
             }
             Some(&(prev_scope, prev_ts)) => {
-                let should_replace =
-                    (prev_scope == ProfileScope::Shared && scope == ProfileScope::Local)
-                        || (prev_scope == scope && ts > prev_ts);
+                let should_replace = (prev_scope == ProfileScope::Shared
+                    && scope == ProfileScope::Local)
+                    || (prev_scope == scope && ts > prev_ts);
                 if should_replace {
                     by_name.insert(name, (scope, ts));
                 }
@@ -258,5 +255,3 @@ pub fn list_profiles(project_root: &Path) -> Vec<ProfileMeta> {
         .map(|(name, scope, _)| ProfileMeta { name, scope })
         .collect()
 }
-
-

@@ -159,7 +159,6 @@ pub fn on_toggle_expand(app: &AppWindow, state: &SharedState, index: usize) {
     }
 }
 
-// In `src/ui/handlers.rs`, replace the entire `on_toggle_check` function:
 pub fn on_toggle_check(app: &AppWindow, state: &SharedState, index: usize) {
     if let Some(row) = get_row_by_index(app, index) {
         let path = PathBuf::from(row.path.as_str());
@@ -450,13 +449,12 @@ fn parse_filters_from_ui(app: &AppWindow, state: &SharedState) {
     }
 
     // Keep workspace.json pointing to the currently selected profile when a profile is active.
-    if idx > 0 {
-        if let Some(mut ws) = load_workspace(&dir)
-            && let Some(meta) = state.borrow().profiles.get((idx as usize) - 1)
-        {
-            ws.current_profile = Some(meta.name.clone());
-            let _ = save_workspace(&dir, &ws);
-        }
+    if idx > 0
+        && let Some(mut ws) = load_workspace(&dir)
+        && let Some(meta) = state.borrow().profiles.get((idx as usize) - 1)
+    {
+        ws.current_profile = Some(meta.name.clone());
+        let _ = save_workspace(&dir, &ws);
     }
 
     // Just update the button state; don't auto-save workspace.
@@ -1104,7 +1102,11 @@ pub fn on_save_profile_as(app: &AppWindow, state: &SharedState) {
                 //    (Index 0 is "— Workspace —", profiles start at 1.)
                 let new_idx: i32 = {
                     let s = state_rc.borrow();
-                    (s.profiles.iter().position(|m| m.name == profile.name).unwrap_or(0) as i32) + 1
+                    (s.profiles
+                        .iter()
+                        .position(|m| m.name == profile.name)
+                        .unwrap_or(0) as i32)
+                        + 1
                 };
                 app.set_selected_profile_index(new_idx);
                 // Also schedule on the event loop to avoid races with UI updates.
