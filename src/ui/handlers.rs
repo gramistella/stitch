@@ -78,6 +78,7 @@ pub fn apply_selection_from_text(app: &AppWindow, state: &SharedState, text: &st
     update_save_button_state(app, state);
 }
 
+// In `src/ui/handlers.rs`, update `on_select_folder`:
 pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
     if let Some(dir) = rfd::FileDialog::new().set_directory(".").pick_folder() {
         {
@@ -88,7 +89,6 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
             s.fs_dirty = true;
         }
 
-        // update window title suffix with the selected project path
         app.set_project_path(format_project_path_for_title(&dir).into());
 
         let _ = ensure_workspace_dir(&dir);
@@ -127,11 +127,23 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
         }
         refresh_profiles_ui(app, state);
 
-        if let Some(ws) = ws_opt
-            && let Some(name) = ws.current_profile
-            && let Some((profile, _)) = load_profile(&dir, &name)
+        // Try to apply the profile referenced by workspace.json if present; if missing,
+        // clear the stale reference via the new core helper.
+        if let Some(ws_loaded) = ws_opt.clone()
+            && let Some(name) = ws_loaded.current_profile.clone()
         {
-            apply_profile_to_ui(app, state, &profile);
+            if let Some((profile, _)) = load_profile(&dir, &name) {
+                apply_profile_to_ui(app, state, &profile);
+            } else {
+                // Best-effort: clear stale profile and ensure UI reflects “— Workspace —”
+                let _ = stitch::core::clear_stale_current_profile(&dir);
+                refresh_profiles_ui(app, state);
+
+                // Refresh the baseline with the cleared state if available
+                if let Some(ws_fixed) = load_workspace(&dir) {
+                    state.borrow_mut().workspace_baseline = Some(ws_fixed);
+                }
+            }
         }
 
         parse_filters_from_ui(app, state);

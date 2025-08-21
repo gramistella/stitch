@@ -129,13 +129,44 @@ Stitch keeps per-project state in a `.stitchworkspace` folder (auto-excluded fro
 
 - **Workspace settings** (`workspace.json`): the “— Workspace —” entry in the selector.
 - **Profiles**: save **named** selections and settings.
-  - **Shared** profiles: `.stitchworkspace/profiles/*.json` (check these into VCS to share)
-  - **Local/Private** profiles: `.stitchworkspace/local/profiles/*.json` (ignored by VCS)
+  - **Shared** profiles → `.stitchworkspace/profiles/*.json`  
+    **Commit these to version control** to share with the team.
+  - **Local/Private** profiles → `.stitchworkspace/local/profiles/*.json`  
+    **Not for VCS** (per-user, machine-specific).
 - UI actions:
   - **Save Workspace Settings** (when “— Workspace —” is selected)
   - **Save / Save As…** (choose Shared vs Local)
   - **Delete**, **Discard Changes**
 - The current profile is remembered in `workspace.json`.
+
+> **Git tip**  
+> When Stitch creates `.stitchworkspace` for the first time, if a root `.gitignore` exists, Stitch appends:
+> ```
+> # Stitch workspace (per-user)
+> .stitchworkspace/local/
+> ```
+> (only if not already present). This keeps local, per-user state out of your repo while letting you commit shared profiles and workspace defaults.
+
+---
+
+## 🤝 Team-wide Collaboration
+
+Stitch is great for **team workflows**—you can standardize “what to share” for PRs, issues, and LLM prompts.
+
+- **Commit the workspace** (excluding local):
+  - Add and commit `.stitchworkspace/` to your repo
+  - The `local/` subfolder is per-user and should stay ignored (Stitch helps by auto-appending it to `.gitignore` on first creation)
+- **Share named profiles**:
+  - Create profiles (e.g., `bug-4321`, `release-notes`, `llm-minimal`) as **Shared**
+  - Commit the resulting JSON files under `.stitchworkspace/profiles/`
+  - Teammates pull and select the same profile to get an identical file selection and scrub settings
+- **Common patterns**:
+  - **PR review kit**: `pr-1234` profile that captures only the touched areas + relevant context
+  - **Minimal repro**: `repro-foo-crash` profile that trims the repo to what matters
+  - **LLM prompt packs**: `api-client-minimal` / `frontend-deps` profiles you can swap between quickly
+
+> **Why it works well**  
+> Profiles are plain JSON and diff nicely in PRs. Everyone can audit exactly what goes in the stitched output. No proprietary format or editor plugin needed.
 
 ---
 

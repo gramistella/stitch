@@ -62,12 +62,62 @@ pub fn workspace_file(project_root: &Path) -> PathBuf {
     workspace_dir(project_root).join("workspace.json")
 }
 
+// In `src/core/workspace.rs`, update `ensure_workspace_dir`:
 pub fn ensure_workspace_dir(project_root: &Path) -> io::Result<PathBuf> {
     let dir = workspace_dir(project_root);
+    let mut created = false;
     if !dir.exists() {
         fs::create_dir_all(&dir)?;
+        created = true;
     }
+
+    // On first creation, try to ensure the local folder is ignored by git.
+    if created {
+        // Best-effort; ignore errors so we don't block the UI or creation flow.
+        let _ = try_ensure_gitignore_local_exclusion(project_root);
+    }
+
     Ok(dir)
+}
+
+// In `src/core/workspace.rs`, add this new helper (top-level, near the other IO helpers):
+fn try_ensure_gitignore_local_exclusion(project_root: &Path) -> io::Result<()> {
+    let gi_path = project_root.join(".gitignore");
+    if !gi_path.exists() {
+        // No .gitignore at project root; nothing to do.
+        return Ok(());
+    }
+
+    // Read existing .gitignore content (lossily; keep going even if weird encodings).
+    let mut contents = fs::read_to_string(&gi_path).unwrap_or_default();
+
+    // Check if any existing rule already ignores the local folder.
+    // We accept common variants like ".stitchworkspace/local", ".stitchworkspace/local/", or "**/.stitchworkspace/local".
+    let already_present = contents.lines().any(|line| {
+        let s = line.trim();
+        // Ignore pure comments and empties for the presence check
+        if s.is_empty() || s.starts_with('#') {
+            return false;
+        }
+        let normalized = s.trim_end_matches('/');
+        normalized.ends_with(".stitchworkspace/local")
+    });
+
+    if already_present {
+        return Ok(());
+    }
+
+    // Prepare an idempotent block to append.
+    let block = "\n# Stitch workspace (per-user)\n.stitchworkspace/local/\n";
+
+    // Ensure the file ends with a single newline before appending our block.
+    if !contents.is_empty() && !contents.ends_with('\n') {
+        contents.push('\n');
+    }
+    contents.push_str(block);
+
+    fs::write(&gi_path, contents)?;
+    Ok(())
 }
 
 /* ============================ Profiles locations ============================ */
@@ -254,4 +304,26 @@ pub fn list_profiles(project_root: &Path) -> Vec<ProfileMeta> {
         .into_iter()
         .map(|(name, scope, _)| ProfileMeta { name, scope })
         .collect()
+}
+
+pub fn clear_stale_current_profile(project_root: &Path) -> io::Result<bool> {
+    // If there's no workspace at all, nothing to clear.
+    let Some(mut ws) = load_workspace(project_root) else {
+        return Ok(false);
+    };
+
+    // If no current profile is set, nothing to clear.
+    let Some(name) = ws.current_profile.clone() else {
+        return Ok(false);
+    };
+
+    // If the profile exists in either Shared or Local scope, it's not stale.
+    if load_profile(project_root, &name).is_some() {
+        return Ok(false);
+    }
+
+    // The profile reference is stale: clear it and persist.
+    ws.current_profile = None;
+    save_workspace(project_root, &ws)?;
+    Ok(true)
 }
