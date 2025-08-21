@@ -116,6 +116,7 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
         return contents.to_string();
     }
 
+    // Group prefixes by their first byte for a quick first-char dispatch.
     let mut by_first: [Vec<&[u8]>; 256] = std::array::from_fn(|_| Vec::new());
     for p in prefixes.iter().filter(|p| !p.is_empty()) {
         let b = p.as_bytes();
@@ -127,15 +128,20 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
     #[derive(Copy, Clone, Debug, PartialEq, Eq)]
     enum State {
         Normal,
-        Dq { escaped: bool },
-        Sq { escaped: bool },
-        Raw { hashes: usize },
-        TripleDq,
-        TripleSq,
+        Dq { escaped: bool },  // "..."
+        Sq { escaped: bool },  // '...'
+        Raw { hashes: usize }, // r#"..."#  (hashes = number of #)
+        TripleDq,              // """..."""
+        TripleSq,              // '''...'''
     }
     let mut state = State::Normal;
 
     'line: for line in contents.lines() {
+        // Treat single/double quoted strings as single-line: clear them on newline.
+        if matches!(state, State::Dq { .. } | State::Sq { .. }) {
+            state = State::Normal;
+        }
+
         let bytes = line.as_bytes();
         let len = bytes.len();
 
@@ -146,12 +152,16 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
             .map(|(i, _)| i)
             .unwrap_or(len);
 
-        // Full-line comments: only when we're NOT inside a multi-line construct.
-        if matches!(state, State::Normal) && first_non_ws < len {
+        // Full-line comments: allowed unless we're inside a *true* multi-line construct.
+        let in_true_multiline =
+            matches!(state, State::Raw { .. } | State::TripleDq | State::TripleSq);
+
+        if !in_true_multiline && first_non_ws < len {
             let bucket = &by_first[bytes[first_non_ws] as usize];
             for p in bucket {
                 if bytes[first_non_ws..].starts_with(p) {
-                    continue 'line; // drop whole line
+                    // Drop the whole line.
+                    continue 'line;
                 }
             }
         }
@@ -161,7 +171,7 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
         // Track whether previous char (in Normal state) was whitespace.
         let mut prev_was_ws = false;
 
-        // Single pass over char indices; use next byte index to avoid len_utf8.
+        // Iterate characters with their starting byte indices.
         let mut iter = line.char_indices().peekable();
         while let Some((pos, ch)) = iter.next() {
             let next_pos = iter.peek().map(|(i, _)| *i).unwrap_or(len);
@@ -169,10 +179,10 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
 
             match state {
                 State::Normal => {
-                    // Triple-quote openers first.
+                    // Triple-quote openers first (so we don't mis-handle """ in Normal).
                     if slice.starts_with(b"\"\"\"") {
                         state = State::TripleDq;
-                        // fast-skip 2 more bytes (we've already consumed one char this loop)
+                        // Skip the next 2 bytes; we've already consumed one char this loop.
                         for _ in 0..2 {
                             iter.next();
                         }
@@ -187,6 +197,7 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
                         continue;
                     }
 
+                    // Raw string start: r#"..."# / r##"..."## / etc.
                     if ch == 'r' {
                         let mut j = next_pos;
                         let mut hashes = 0usize;
@@ -203,6 +214,7 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
                         }
                     }
 
+                    // Single / double quoted strings (single-line in our lexer).
                     if ch == '"' {
                         state = State::Dq { escaped: false };
                         prev_was_ws = false;
@@ -213,6 +225,7 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
                         continue;
                     }
 
+                    // Inline comment prefixes: only if preceded by whitespace and after leading ws.
                     if pos >= first_non_ws && prev_was_ws {
                         let b0 = bytes[pos];
                         let bucket = &by_first[b0 as usize];
@@ -255,10 +268,12 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
                 }
 
                 State::Raw { hashes } => {
+                    // Raw strings close with a '"' followed by exactly `hashes` #'s.
                     if bytes[pos] == b'"' {
                         let end = pos + 1 + hashes;
                         if end <= len && bytes[pos + 1..end].iter().all(|&b| b == b'#') {
                             state = State::Normal;
+                            // Consume to `end`.
                             while iter.peek().is_some_and(|(i, _)| *i < end) {
                                 iter.next();
                             }
@@ -296,6 +311,7 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
         }
 
         if let Some(mut end) = cut_at {
+            // Trim trailing spaces before the inline comment marker.
             while end > 0 {
                 let b = bytes[end - 1];
                 if b == b' ' || b == b'\t' {
