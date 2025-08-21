@@ -435,7 +435,10 @@ export component AppWindow inherits Window {
     icon: @image-url("assets/icon.png");
 
     in-out property <string> app-version;
-    title: "Stitch v" + root.app-version;
+    in-out property <string> project-path;
+
+    title: "Stitch v" + root.app-version
+         + (root.project-path != "" ? " (" + root.project-path + ")" : "");
 
     in-out property <[Row]> tree-model;
     in-out property <string> ext-filter;

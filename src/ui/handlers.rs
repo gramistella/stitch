@@ -88,6 +88,9 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
             s.fs_dirty = true;
         }
 
+        // update window title suffix with the selected project path
+        app.set_project_path(format_project_path_for_title(&dir).into());
+
         let _ = ensure_workspace_dir(&dir);
         let _ = ensure_profiles_dirs(&dir);
 
@@ -101,7 +104,6 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
             app.set_hierarchy_only(ws.hierarchy_only);
             app.set_dirs_only(ws.dirs_only);
 
-            // Set workspace baseline from disk
             state.borrow_mut().workspace_baseline = Some(ws.clone());
         } else {
             let seed = WorkspaceSettings {
@@ -116,7 +118,6 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
                 current_profile: None,
             };
             let _ = save_workspace(&dir, &seed);
-            // Set baseline to the freshly seeded workspace
             state.borrow_mut().workspace_baseline = Some(seed);
         }
 
@@ -1352,4 +1353,20 @@ fn workspace_settings_equal(a: &WorkspaceSettings, b: &WorkspaceSettings) -> boo
         && a.hierarchy_only == b.hierarchy_only
         && a.dirs_only == b.dirs_only
     // Note: we intentionally ignore `current_profile` here for dirtiness comparison
+}
+
+fn format_project_path_for_title(dir: &Path) -> String {
+    // Prefer HOME (Unix) or USERPROFILE (Windows) for "~" replacement.
+    let home_opt = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+    if let Some(home_os) = home_opt {
+        let home = std::path::PathBuf::from(home_os);
+        if let Ok(rel) = dir.strip_prefix(&home) {
+            if rel.as_os_str().is_empty() {
+                return "~".to_string();
+            } else {
+                return format!("~/{}", path_to_unix(rel));
+            }
+        }
+    }
+    path_to_unix(dir)
 }
