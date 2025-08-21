@@ -1,6 +1,11 @@
 use regex::Regex;
 use std::{
-    cell::RefCell, collections::{HashMap, HashSet}, path::PathBuf, rc::Rc, sync::mpsc, time::SystemTime
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    path::PathBuf,
+    rc::Rc,
+    sync::mpsc,
+    time::SystemTime,
 };
 
 #[derive(Default)]

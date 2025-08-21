@@ -237,13 +237,17 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
         let mut rels = Vec::new();
         if want_dirs_only {
             for d in &dirs {
-                if let Ok(r) = d.strip_prefix(&selected_dir) && !r.as_os_str().is_empty() {
+                if let Ok(r) = d.strip_prefix(&selected_dir)
+                    && !r.as_os_str().is_empty()
+                {
                     rels.push(path_to_unix(r));
                 }
             }
         } else {
             for f in &files {
-                if let Ok(r) = f.strip_prefix(&selected_dir) && !r.as_os_str().is_empty() {
+                if let Ok(r) = f.strip_prefix(&selected_dir)
+                    && !r.as_os_str().is_empty()
+                {
                     rels.push(path_to_unix(r));
                 }
             }
@@ -258,7 +262,8 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
         (files, dirs, rels, selected_dir, root_name)
     };
 
-    if (!want_dirs_only && selected_files.is_empty()) || (want_dirs_only && selected_dirs.is_empty())
+    if (!want_dirs_only && selected_files.is_empty())
+        || (want_dirs_only && selected_dirs.is_empty())
     {
         set_output(app, state, "No items selected.\n");
         update_last_refresh(app);
@@ -277,7 +282,10 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
     // Render the hierarchy now (instant feedback)
     let mut header = String::new();
     header.push_str("=== FILE HIERARCHY ===\n\n");
-    header.push_str(&render_unicode_tree_from_paths(&relative_paths, Some(&root_name)));
+    header.push_str(&render_unicode_tree_from_paths(
+        &relative_paths,
+        Some(&root_name),
+    ));
 
     // If only hierarchy/dirs, finish synchronously.
     if hierarchy_only || want_dirs_only {
@@ -367,16 +375,23 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
             };
 
             if !remove_prefixes.is_empty() {
-                contents = stitch::core::strip_lines_and_inline_comments(&contents, &remove_prefixes);
+                contents =
+                    stitch::core::strip_lines_and_inline_comments(&contents, &remove_prefixes);
             }
             if let Some(rr) = &remove_regex_opt {
                 contents = rr.replace_all(&contents, "").to_string();
             }
 
-            out.push_str(&format!("--- Start of file: {} ---\n", rel.to_string_lossy()));
+            out.push_str(&format!(
+                "--- Start of file: {} ---\n",
+                rel.to_string_lossy()
+            ));
             out.push_str(&contents);
             out.push('\n');
-            out.push_str(&format!("--- End of file: {} ---\n\n", rel.to_string_lossy()));
+            out.push_str(&format!(
+                "--- End of file: {} ---\n\n",
+                rel.to_string_lossy()
+            ));
         }
 
         // Send final result back to the UI thread pump
