@@ -1,10 +1,6 @@
 use regex::Regex;
 use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-    path::PathBuf,
-    rc::Rc,
-    time::SystemTime,
+    cell::RefCell, collections::{HashMap, HashSet}, path::PathBuf, rc::Rc, sync::mpsc, time::SystemTime
 };
 
 #[derive(Default)]
@@ -39,6 +35,13 @@ pub struct AppState {
     pub profile_baseline: Option<stitch::core::Profile>,
 
     pub workspace_baseline: Option<stitch::core::WorkspaceSettings>,
+
+    pub is_generating: bool,
+    pub regen_after: bool,
+    pub gen_seq: u64,
+    pub gen_result_tx: Option<mpsc::Sender<(u64, String)>>,
+    pub gen_result_rx: Option<mpsc::Receiver<(u64, String)>>,
+    pub gen_pump_timer: slint::Timer,
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;

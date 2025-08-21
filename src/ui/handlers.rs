@@ -197,11 +197,23 @@ pub fn on_toggle_check(app: &AppWindow, state: &SharedState, index: usize) {
 }
 
 pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
+    // Coalesce clicks: if a run is active, queue a single re-run and show a tiny placeholder.
+    {
+        let mut s = state.borrow_mut();
+        if s.is_generating {
+            s.regen_after = true;
+            app.set_output_text("⏳ Generating… (queued)".into());
+            app.set_output_stats("".into());
+            return;
+        }
+    }
+
     parse_filters_from_ui(app, state);
 
     let want_dirs_only = app.get_dirs_only();
     let hierarchy_only = app.get_hierarchy_only();
 
+    // Basic guards
     let no_folder_selected = {
         let s = state.borrow();
         s.selected_directory.is_none() || s.root_node.is_none()
@@ -212,86 +224,140 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
         return;
     }
 
-    let (selected_files, selected_dirs, relative_paths) = {
+    // Collect the selection & render the hierarchy header on the UI thread (cheap)
+    let (selected_files, selected_dirs, relative_paths, selected_dir, root_name) = {
         let s = state.borrow();
         let root = s.root_node.as_ref().unwrap();
         let mut files = Vec::new();
         let mut dirs = Vec::new();
         collect_selected_paths(root, &s.explicit_states, None, &mut files, &mut dirs);
 
-        let selected_dir = s.selected_directory.as_ref().unwrap();
+        let selected_dir = s.selected_directory.as_ref().unwrap().clone();
+
         let mut rels = Vec::new();
         if want_dirs_only {
             for d in &dirs {
-                if let Ok(r) = d.strip_prefix(selected_dir)
-                    && !r.as_os_str().is_empty()
-                {
+                if let Ok(r) = d.strip_prefix(&selected_dir) && !r.as_os_str().is_empty() {
                     rels.push(path_to_unix(r));
                 }
             }
         } else {
             for f in &files {
-                if let Ok(r) = f.strip_prefix(selected_dir)
-                    && !r.as_os_str().is_empty()
-                {
+                if let Ok(r) = f.strip_prefix(&selected_dir) && !r.as_os_str().is_empty() {
                     rels.push(path_to_unix(r));
                 }
             }
         }
-        (files, dirs, rels)
+
+        let root_name = selected_dir
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        (files, dirs, rels, selected_dir, root_name)
     };
 
-    if (!want_dirs_only && selected_files.is_empty())
-        || (want_dirs_only && selected_dirs.is_empty())
+    if (!want_dirs_only && selected_files.is_empty()) || (want_dirs_only && selected_dirs.is_empty())
     {
         set_output(app, state, "No items selected.\n");
         update_last_refresh(app);
         return;
     }
 
-    {
+    // Touch mtimes (cheap metadata)
+    if !want_dirs_only {
         let mut s = state.borrow_mut();
-        if !want_dirs_only {
-            for fp in &selected_files {
-                let mtime = fs::metadata(fp).ok().and_then(|m| m.modified().ok());
-                s.last_mod_times.insert(fp.clone(), mtime);
-            }
+        for fp in &selected_files {
+            let mtime = fs::metadata(fp).ok().and_then(|m| m.modified().ok());
+            s.last_mod_times.insert(fp.clone(), mtime);
         }
     }
 
-    let mut out = String::new();
-    out.push_str("=== FILE HIERARCHY ===\n\n");
+    // Render the hierarchy now (instant feedback)
+    let mut header = String::new();
+    header.push_str("=== FILE HIERARCHY ===\n\n");
+    header.push_str(&render_unicode_tree_from_paths(&relative_paths, Some(&root_name)));
 
-    let root_name = {
-        let s = state.borrow();
-        s.selected_directory
-            .as_ref()
-            .map(|p| {
-                p.file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-                    .to_string()
-            })
-            .unwrap_or_else(|| "root".into())
-    };
-    out.push_str(&render_unicode_tree_from_paths(
-        &relative_paths,
-        Some(&root_name),
-    ));
+    // If only hierarchy/dirs, finish synchronously.
+    if hierarchy_only || want_dirs_only {
+        set_output(app, state, &header);
+        update_last_refresh(app);
+        return;
+    }
 
-    if !hierarchy_only && !app.get_dirs_only() {
+    // ---- Heavy path: read + scrub files on a worker thread ----
+
+    // Tiny in-place placeholder (don’t clobber state.full_output_text; set_output() will do that later)
+    app.set_output_text("⏳ Generating…".into());
+    app.set_output_stats("".into());
+
+    // Snapshot params for the worker
+    let remove_prefixes = { state.borrow().remove_prefixes.clone() };
+    let remove_regex_opt = { state.borrow().remove_regex.clone() };
+    let files_to_read = selected_files.clone();
+    let selected_dir_for_rel = selected_dir.clone();
+
+    // Ensure a result channel & start a UI-thread pump (if not already running)
+    {
+        let mut s = state.borrow_mut();
+        if s.gen_result_tx.is_none() || s.gen_result_rx.is_none() {
+            let (tx, rx) = mpsc::channel::<(u64, String)>();
+            s.gen_result_tx = Some(tx);
+            s.gen_result_rx = Some(rx);
+
+            let app_weak = app.as_weak();
+            let state_rc = state.clone();
+            s.gen_pump_timer.start(
+                slint::TimerMode::Repeated,
+                std::time::Duration::from_millis(120),
+                move || {
+                    if let (Some(app), Some(out)) = (app_weak.upgrade(), {
+                        // Drain to the latest message, if any
+                        let mut last: Option<(u64, String)> = None;
+                        if let Some(rx) = state_rc.borrow().gen_result_rx.as_ref() {
+                            while let Ok(msg) = rx.try_recv() {
+                                last = Some(msg);
+                            }
+                        }
+                        last.map(|(_, s)| s)
+                    }) {
+                        // Apply final output on the UI thread
+                        set_output(&app, &state_rc, &out);
+                        update_last_refresh(&app);
+
+                        // Flip flags and maybe coalesced re-run
+                        let rerun = {
+                            let mut st = state_rc.borrow_mut();
+                            st.is_generating = false;
+                            let again = st.regen_after;
+                            st.regen_after = false;
+                            again
+                        };
+
+                        if rerun {
+                            on_generate_output(&app, &state_rc);
+                        }
+                    }
+                },
+            );
+        }
+
+        s.is_generating = true;
+        s.regen_after = false;
+        s.gen_seq = s.gen_seq.wrapping_add(1);
+    }
+    let my_seq = { state.borrow().gen_seq };
+
+    // Spawn worker (captures only Send things)
+    let tx = { state.borrow().gen_result_tx.as_ref().unwrap().clone() };
+    std::thread::spawn(move || {
+        let mut out = header;
         out.push_str("\n=== FILE CONTENTS ===\n\n");
 
-        let (remove_prefixes, remove_regex_opt) = {
-            let s = state.borrow();
-            (s.remove_prefixes.clone(), s.remove_regex.clone())
-        };
-
-        let s_dir = { state.borrow().selected_directory.clone().unwrap() };
-
-        for fp in selected_files {
+        for fp in files_to_read {
             let rel: PathBuf = fp
-                .strip_prefix(&s_dir)
+                .strip_prefix(&selected_dir_for_rel)
                 .map(|p| p.to_path_buf())
                 .unwrap_or_else(|_| PathBuf::from(fp.file_name().unwrap_or_default()));
 
@@ -301,28 +367,21 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
             };
 
             if !remove_prefixes.is_empty() {
-                contents =
-                    stitch::core::strip_lines_and_inline_comments(&contents, &remove_prefixes);
+                contents = stitch::core::strip_lines_and_inline_comments(&contents, &remove_prefixes);
             }
             if let Some(rr) = &remove_regex_opt {
                 contents = rr.replace_all(&contents, "").to_string();
             }
 
-            out.push_str(&format!(
-                "--- Start of file: {} ---\n",
-                rel.to_string_lossy()
-            ));
+            out.push_str(&format!("--- Start of file: {} ---\n", rel.to_string_lossy()));
             out.push_str(&contents);
             out.push('\n');
-            out.push_str(&format!(
-                "--- End of file: {} ---\n\n",
-                rel.to_string_lossy()
-            ));
+            out.push_str(&format!("--- End of file: {} ---\n\n", rel.to_string_lossy()));
         }
-    }
 
-    set_output(app, state, &out);
-    update_last_refresh(app);
+        // Send final result back to the UI thread pump
+        let _ = tx.send((my_seq, out));
+    });
 }
 
 pub fn on_copy_output(app: &AppWindow, state: &SharedState) {

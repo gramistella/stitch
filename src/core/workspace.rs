@@ -108,13 +108,15 @@ fn try_ensure_gitignore_local_exclusion(project_root: &Path) -> io::Result<()> {
     }
 
     // Prepare an idempotent block to append.
-    let block = "\n# Stitch workspace (per-user)\n.stitchworkspace/local/\n";
+    let eol = if contents.contains("\r\n") { "\r\n" } else { "\n" };
+    let block = format!("{eol}# Stitch workspace (per-user){eol}.stitchworkspace/local/{eol}");
+
 
     // Ensure the file ends with a single newline before appending our block.
     if !contents.is_empty() && !contents.ends_with('\n') {
         contents.push('\n');
     }
-    contents.push_str(block);
+    contents.push_str(&block);
 
     fs::write(&gi_path, contents)?;
     Ok(())
