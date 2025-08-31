@@ -1,6 +1,6 @@
 use stitch::core::{
-    clear_stale_current_profile, load_local_settings, save_local_settings, save_profile,
-    LocalSettings, Profile, ProfileScope, WorkspaceSettings,
+    LocalSettings, Profile, ProfileScope, WorkspaceSettings, clear_stale_current_profile,
+    load_local_settings, save_local_settings, save_profile,
 };
 use tempfile::TempDir;
 
@@ -104,8 +104,5 @@ fn noop_when_local_settings_are_missing() {
     let root = tmp.path();
 
     let res = clear_stale_current_profile(root).expect("call should succeed");
-    assert!(
-        !res,
-        "nothing to clear when local settings file is absent"
-    );
+    assert!(!res, "nothing to clear when local settings file is absent");
 }
