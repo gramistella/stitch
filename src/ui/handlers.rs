@@ -15,9 +15,9 @@ use stitch::core::{
     Node, Profile, ProfileScope, WorkspaceSettings, clean_remove_regex,
     collapse_consecutive_blank_lines, collect_selected_paths, compile_remove_regex_opt,
     delete_profile, ensure_profiles_dirs, ensure_workspace_dir, gather_paths_set, is_ancestor_of,
-    list_profiles, load_profile, load_workspace, parse_extension_filters, parse_hierarchy_text,
-    path_to_unix, render_unicode_tree_from_paths, save_profile, save_workspace, scan_dir_to_node,
-    split_prefix_list,
+    list_profiles, load_local_settings, load_profile, load_workspace, parse_extension_filters,
+    parse_hierarchy_text, path_to_unix, render_unicode_tree_from_paths, save_local_settings,
+    save_profile, save_workspace, scan_dir_to_node, split_prefix_list,
 };
 
 const UI_OUTPUT_CHAR_LIMIT: usize = 50_000;
@@ -78,7 +78,6 @@ pub fn apply_selection_from_text(app: &AppWindow, state: &SharedState, text: &st
     update_save_button_state(app, state);
 }
 
-// In `src/ui/handlers.rs`, update `on_select_folder`:
 pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
     if let Some(dir) = rfd::FileDialog::new().set_directory(".").pick_folder() {
         {
@@ -115,7 +114,6 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
                 remove_regex: app.get_remove_regex().to_string(),
                 hierarchy_only: app.get_hierarchy_only(),
                 dirs_only: app.get_dirs_only(),
-                current_profile: None,
             };
             let _ = save_workspace(&dir, &seed);
             state.borrow_mut().workspace_baseline = Some(seed);
@@ -127,22 +125,14 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
         }
         refresh_profiles_ui(app, state);
 
-        // Try to apply the profile referenced by workspace.json if present; if missing,
-        // clear the stale reference via the new core helper.
-        if let Some(ws_loaded) = ws_opt.clone()
-            && let Some(name) = ws_loaded.current_profile.clone()
+        if let Some(local_settings) = load_local_settings(&dir)
+            && let Some(name) = local_settings.current_profile.clone()
         {
             if let Some((profile, _)) = load_profile(&dir, &name) {
                 apply_profile_to_ui(app, state, &profile);
             } else {
-                // Best-effort: clear stale profile and ensure UI reflects “— Workspace —”
                 let _ = stitch::core::clear_stale_current_profile(&dir);
                 refresh_profiles_ui(app, state);
-
-                // Refresh the baseline with the cleared state if available
-                if let Some(ws_fixed) = load_workspace(&dir) {
-                    state.borrow_mut().workspace_baseline = Some(ws_fixed);
-                }
             }
         }
 
@@ -535,16 +525,14 @@ fn parse_filters_from_ui(app: &AppWindow, state: &SharedState) {
         return;
     }
 
-    // Keep workspace.json pointing to the currently selected profile when a profile is active.
     if idx > 0
-        && let Some(mut ws) = load_workspace(&dir)
+        && let mut local_settings = load_local_settings(&dir).unwrap_or_default()
         && let Some(meta) = state.borrow().profiles.get((idx as usize) - 1)
     {
-        ws.current_profile = Some(meta.name.clone());
-        let _ = save_workspace(&dir, &ws);
+        local_settings.current_profile = Some(meta.name.clone());
+        let _ = save_local_settings(&dir, &local_settings);
     }
 
-    // Just update the button state; don't auto-save workspace.
     update_save_button_state(app, state);
 }
 
@@ -876,12 +864,12 @@ fn refresh_profiles_ui(app: &AppWindow, state: &SharedState) {
             names.push(p.name.clone().into());
         }
 
-        let current_profile_name = load_workspace(
+        let current_profile_name = load_local_settings(
             s.selected_directory
                 .as_deref()
                 .unwrap_or_else(|| std::path::Path::new("")),
         )
-        .and_then(|w| w.current_profile);
+        .and_then(|s| s.current_profile);
 
         let idx = if let Some(sel) = current_profile_name {
             let mut found = 0i32;
@@ -933,7 +921,6 @@ fn capture_profile_from_ui(app: &AppWindow, state: &SharedState, name: &str) -> 
         remove_regex: app.get_remove_regex().to_string(),
         hierarchy_only: app.get_hierarchy_only(),
         dirs_only: app.get_dirs_only(),
-        current_profile: Some(name.to_string()),
     };
 
     // NOTE: Preserve root selection by storing an empty relative path ("")
@@ -1009,10 +996,10 @@ pub fn on_select_profile(app: &AppWindow, state: &SharedState, index: i32) {
     };
 
     if index <= 0 {
-        if let Some(mut ws) = load_workspace(&root) {
-            ws.current_profile = None;
-            let _ = save_workspace(&root, &ws);
-
+        let mut local_settings = load_local_settings(&root).unwrap_or_default();
+        local_settings.current_profile = None;
+        let _ = save_local_settings(&root, &local_settings);
+        if let Some(ws) = load_workspace(&root) {
             app.set_ext_filter(ws.ext_filter.clone().into());
             app.set_exclude_dirs(ws.exclude_dirs.clone().into());
             app.set_exclude_files(ws.exclude_files.clone().into());
@@ -1021,7 +1008,6 @@ pub fn on_select_profile(app: &AppWindow, state: &SharedState, index: i32) {
             app.set_hierarchy_only(ws.hierarchy_only);
             app.set_dirs_only(ws.dirs_only);
 
-            // Update baseline to the workspace we just loaded
             state.borrow_mut().workspace_baseline = Some(ws.clone());
 
             parse_filters_from_ui(app, state);
@@ -1046,10 +1032,9 @@ pub fn on_select_profile(app: &AppWindow, state: &SharedState, index: i32) {
     };
 
     if let Some((profile, _)) = load_profile(&root, &name) {
-        if let Some(mut ws) = load_workspace(&root) {
-            ws.current_profile = Some(name.clone());
-            let _ = save_workspace(&root, &ws);
-        }
+        let mut local_settings = load_local_settings(&root).unwrap_or_default();
+        local_settings.current_profile = Some(name.clone());
+        let _ = save_local_settings(&root, &local_settings);
         apply_profile_to_ui(app, state, &profile);
     }
 }
@@ -1060,7 +1045,6 @@ pub fn on_save_profile_current(app: &AppWindow, state: &SharedState) {
         return;
     }
 
-    // Save Global Workspace Settings
     if idx == 0 {
         let Some(project_root) = state.borrow().selected_directory.clone() else {
             return;
@@ -1075,12 +1059,10 @@ pub fn on_save_profile_current(app: &AppWindow, state: &SharedState) {
             remove_regex: app.get_remove_regex().to_string(),
             hierarchy_only: app.get_hierarchy_only(),
             dirs_only: app.get_dirs_only(),
-            current_profile: None,
         };
 
         let _ = save_workspace(&project_root, &ws);
 
-        // Update baseline and disable Save
         {
             let mut s = state.borrow_mut();
             s.workspace_baseline = Some(ws);
@@ -1089,7 +1071,6 @@ pub fn on_save_profile_current(app: &AppWindow, state: &SharedState) {
         return;
     }
 
-    // Save existing personal profile
     let (old_name, scope, project_root) = {
         let s = state.borrow();
         let Some(dir) = s.selected_directory.clone() else {
@@ -1117,10 +1098,9 @@ pub fn on_save_profile_current(app: &AppWindow, state: &SharedState) {
         let _ = delete_profile(&project_root, scope, &old_name);
     }
 
-    if let Some(mut ws) = load_workspace(&project_root) {
-        ws.current_profile = Some(new_name.clone());
-        let _ = save_workspace(&project_root, &ws);
-    }
+    let mut local_settings = load_local_settings(&project_root).unwrap_or_default();
+    local_settings.current_profile = Some(new_name.clone());
+    let _ = save_local_settings(&project_root, &local_settings);
 
     {
         let mut s = state.borrow_mut();
@@ -1158,16 +1138,12 @@ pub fn on_save_profile_as(app: &AppWindow, state: &SharedState) {
             if let Some(root) = project_root
                 && let Some(profile) = capture_profile_from_ui(&app, &state_rc, name.as_str())
             {
-                // 1) Persist the new profile file.
                 let _ = save_profile(&root, &profile, scope);
 
-                // 2) Make it the current profile in the workspace FIRST.
-                if let Some(mut ws) = load_workspace(&root) {
-                    ws.current_profile = Some(profile.name.clone());
-                    let _ = save_workspace(&root, &ws);
-                }
+                let mut local_settings = load_local_settings(&root).unwrap_or_default();
+                local_settings.current_profile = Some(profile.name.clone());
+                let _ = save_local_settings(&root, &local_settings);
 
-                // 3) Refresh in-memory list (now sorted by your list_profiles impl).
                 {
                     let mut s = state_rc.borrow_mut();
                     s.profiles = list_profiles(&root);
@@ -1267,7 +1243,6 @@ fn update_save_button_state(app: &AppWindow, state: &SharedState) {
             remove_regex: app.get_remove_regex().to_string(),
             hierarchy_only: app.get_hierarchy_only(),
             dirs_only: app.get_dirs_only(),
-            current_profile: None,
         };
 
         let baseline_opt = { state.borrow().workspace_baseline.clone() };
@@ -1327,10 +1302,10 @@ pub fn on_delete_profile(app: &AppWindow, state: &SharedState) {
 
     let _ = delete_profile(&project_root, meta.scope, &meta.name);
 
-    if let Some(mut ws) = load_workspace(&project_root) {
-        ws.current_profile = None;
-        let _ = save_workspace(&project_root, &ws);
-
+    let mut local_settings = load_local_settings(&project_root).unwrap_or_default();
+    local_settings.current_profile = None;
+    let _ = save_local_settings(&project_root, &local_settings);
+    if let Some(ws) = load_workspace(&project_root) {
         app.set_ext_filter(ws.ext_filter.clone().into());
         app.set_exclude_dirs(ws.exclude_dirs.clone().into());
         app.set_exclude_files(ws.exclude_files.clone().into());

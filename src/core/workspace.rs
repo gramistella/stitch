@@ -17,8 +17,10 @@ pub struct WorkspaceSettings {
     pub remove_regex: String,
     pub hierarchy_only: bool,
     pub dirs_only: bool,
+}
 
-    /// Optional name of the currently-selected profile (if any).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct LocalSettings {
     #[serde(default)]
     pub current_profile: Option<String>,
 }
@@ -62,7 +64,12 @@ pub fn workspace_file(project_root: &Path) -> PathBuf {
     workspace_dir(project_root).join("workspace.json")
 }
 
-// In `src/core/workspace.rs`, update `ensure_workspace_dir`:
+pub fn local_settings_file(project_root: &Path) -> PathBuf {
+    workspace_dir(project_root)
+        .join("local")
+        .join("settings.json")
+}
+
 pub fn ensure_workspace_dir(project_root: &Path) -> io::Result<PathBuf> {
     let dir = workspace_dir(project_root);
     let mut created = false;
@@ -178,6 +185,27 @@ pub fn save_workspace(project_root: &Path, settings: &WorkspaceSettings) -> io::
     ensure_workspace_dir(project_root)?;
 
     let path = workspace_file(project_root);
+    let tmp = path.with_extension("json.tmp");
+
+    let data = serde_json::to_vec_pretty(settings).map_err(|e| io::Error::other(e.to_string()))?;
+
+    fs::write(&tmp, data)?;
+    fs::rename(&tmp, &path)?;
+    Ok(())
+}
+
+pub fn load_local_settings(project_root: &Path) -> Option<LocalSettings> {
+    let path = local_settings_file(project_root);
+    let data = fs::read(&path).ok()?;
+    serde_json::from_slice::<LocalSettings>(&data).ok()
+}
+
+pub fn save_local_settings(project_root: &Path, settings: &LocalSettings) -> io::Result<()> {
+    ensure_workspace_dir(project_root)?;
+    let path = local_settings_file(project_root);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
     let tmp = path.with_extension("json.tmp");
 
     let data = serde_json::to_vec_pretty(settings).map_err(|e| io::Error::other(e.to_string()))?;
@@ -312,23 +340,17 @@ pub fn list_profiles(project_root: &Path) -> Vec<ProfileMeta> {
 }
 
 pub fn clear_stale_current_profile(project_root: &Path) -> io::Result<bool> {
-    // If there's no workspace at all, nothing to clear.
-    let Some(mut ws) = load_workspace(project_root) else {
+    let mut local_settings = load_local_settings(project_root).unwrap_or_default();
+
+    let Some(name) = local_settings.current_profile.clone() else {
         return Ok(false);
     };
 
-    // If no current profile is set, nothing to clear.
-    let Some(name) = ws.current_profile.clone() else {
-        return Ok(false);
-    };
-
-    // If the profile exists in either Shared or Local scope, it's not stale.
     if load_profile(project_root, &name).is_some() {
         return Ok(false);
     }
 
-    // The profile reference is stale: clear it and persist.
-    ws.current_profile = None;
-    save_workspace(project_root, &ws)?;
+    local_settings.current_profile = None;
+    save_local_settings(project_root, &local_settings)?;
     Ok(true)
 }

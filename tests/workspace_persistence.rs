@@ -26,7 +26,6 @@ fn save_then_load_roundtrip_and_overwrite_is_atomic() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
 
-    // First save
     let s1 = WorkspaceSettings {
         version: 1,
         ext_filter: ".rs,.toml".into(),
@@ -36,11 +35,9 @@ fn save_then_load_roundtrip_and_overwrite_is_atomic() {
         remove_regex: "\"\"\"(?m)^\\s*TODO:.*$\"\"\"".into(),
         hierarchy_only: false,
         dirs_only: false,
-        current_profile: None,
     };
     save_workspace(root, &s1).expect("save v1");
 
-    // File exists and loads back
     let wf = workspace_file(root);
     assert!(wf.exists(), "workspace.json must exist after save");
 
@@ -53,9 +50,7 @@ fn save_then_load_roundtrip_and_overwrite_is_atomic() {
     assert_eq!(loaded1.remove_regex, s1.remove_regex);
     assert_eq!(loaded1.hierarchy_only, s1.hierarchy_only);
     assert_eq!(loaded1.dirs_only, s1.dirs_only);
-    assert_eq!(loaded1.current_profile, None);
 
-    // Overwrite with different settings
     let mut s2 = loaded1.clone();
     s2.ext_filter = ".rs".into();
     s2.hierarchy_only = true;
@@ -65,7 +60,6 @@ fn save_then_load_roundtrip_and_overwrite_is_atomic() {
     assert_eq!(loaded2.ext_filter, ".rs");
     assert!(loaded2.hierarchy_only);
 
-    // The temporary file used for atomic write should not remain.
     let tmp_path = wf.with_extension("json.tmp");
     assert!(
         !tmp_path.exists(),

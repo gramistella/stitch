@@ -30,7 +30,6 @@ fn sample_ws() -> WorkspaceSettings {
         remove_regex: "TODO:.*$".into(),
         hierarchy_only: false,
         dirs_only: false,
-        current_profile: None,
     }
 }
 
