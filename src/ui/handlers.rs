@@ -640,10 +640,11 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
     }
 
     let total_chars = normalized.chars().count();
+    let total_lines = if normalized.is_empty() { 0 } else { normalized.lines().count() };
 
     #[cfg(feature = "tokens")]
     {
-        app.set_output_stats(format!("{total_chars} chars • … tokens").into());
+        app.set_output_stats(format!("{total_chars} chars • … tokens • {total_lines} LOC").into());
 
         const MAX_TOKENIZE_BYTES: usize = 16 * 1024 * 1024;
         let text = normalized.clone();
@@ -653,7 +654,8 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
             std::thread::spawn(move || {
                 let tokens = count_tokens(&text);
                 let chars = text.chars().count();
-                let label = format!("{chars} chars • {tokens} tokens");
+                let lines = if text.is_empty() { 0 } else { text.lines().count() };
+                let label = format!("{chars} chars • {tokens} tokens • {lines} LOC");
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(app) = app_weak.upgrade() {
                         app.set_output_stats(label.into());
@@ -662,7 +664,7 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
             });
         } else {
             app.set_output_stats(
-                format!("{total_chars} chars • (token count skipped for large output)").into(),
+                format!("{total_chars} chars • (token count skipped for large output) • {total_lines} LOC").into(),
             );
         }
     }
@@ -670,7 +672,7 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
     #[cfg(not(feature = "tokens"))]
     {
         let total_tokens = count_tokens(&normalized);
-        app.set_output_stats(format!("{total_chars} chars • {total_tokens} tokens").into());
+        app.set_output_stats(format!("{total_chars} chars • {total_tokens} tokens • {total_lines} LOC").into());
     }
 
     let displayed: String = if total_chars <= UI_OUTPUT_CHAR_LIMIT {
