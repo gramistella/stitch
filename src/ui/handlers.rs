@@ -209,7 +209,7 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
         s.selected_directory.is_none() || s.root_node.is_none()
     };
     if no_folder_selected {
-        set_output(app, state, "No folder selected.\n");
+        set_output(app, state, NO_FOLDER_SELECTED);
         update_last_refresh(app);
         return;
     }
@@ -255,7 +255,7 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
     if (!want_dirs_only && selected_files.is_empty())
         || (want_dirs_only && selected_dirs.is_empty())
     {
-        set_output(app, state, "No items selected.\n");
+        set_output(app, state, NO_ITEMS_SELECTED);
         update_last_refresh(app);
         return;
     }
@@ -639,8 +639,11 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
         st.full_output_text = normalized.clone();
     }
 
-    let total_chars = normalized.chars().count();
-    let total_lines = if normalized.is_empty() { 0 } else { normalized.lines().count() };
+    // Check if this is a placeholder message that shouldn't count towards stats
+    let is_placeholder = is_placeholder_message(&normalized);
+    
+    let total_chars = if is_placeholder { 0 } else { normalized.chars().count() };
+    let total_lines = if is_placeholder || normalized.is_empty() { 0 } else { normalized.lines().count() };
 
     #[cfg(feature = "tokens")]
     {
@@ -652,9 +655,10 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
 
         if text.len() <= MAX_TOKENIZE_BYTES {
             std::thread::spawn(move || {
-                let tokens = count_tokens(&text);
-                let chars = text.chars().count();
-                let lines = if text.is_empty() { 0 } else { text.lines().count() };
+                let is_placeholder = is_placeholder_message(&text);
+                let tokens = if is_placeholder { 0 } else { count_tokens(&text) };
+                let chars = if is_placeholder { 0 } else { text.chars().count() };
+                let lines = if is_placeholder || text.is_empty() { 0 } else { text.lines().count() };
                 let label = format!("{chars} chars • {tokens} tokens • {lines} LOC");
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(app) = app_weak.upgrade() {
@@ -671,7 +675,7 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
 
     #[cfg(not(feature = "tokens"))]
     {
-        let total_tokens = count_tokens(&normalized);
+        let total_tokens = if is_placeholder { 0 } else { count_tokens(&normalized) };
         app.set_output_stats(format!("{total_chars} chars • {total_tokens} tokens • {total_lines} LOC").into());
     }
 
@@ -828,6 +832,17 @@ fn start_fs_watcher(app: &AppWindow, state: &SharedState) -> notify::Result<()> 
     }
 
     Ok(())
+}
+
+/* ============================ Placeholder detection ============================ */
+
+// Constants for placeholder messages that shouldn't count towards statistics
+const NO_FOLDER_SELECTED: &str = "No folder selected.\n";
+const NO_ITEMS_SELECTED: &str = "No items selected.\n";
+
+/// Determines if the given text is a placeholder message that shouldn't count towards statistics
+fn is_placeholder_message(text: &str) -> bool {
+    text == NO_FOLDER_SELECTED || text == NO_ITEMS_SELECTED
 }
 
 /* ============================ Token counting ============================ */
