@@ -641,9 +641,17 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
 
     // Check if this is a placeholder message that shouldn't count towards stats
     let is_placeholder = is_placeholder_message(&normalized);
-    
-    let total_chars = if is_placeholder { 0 } else { normalized.chars().count() };
-    let total_lines = if is_placeholder || normalized.is_empty() { 0 } else { normalized.lines().count() };
+
+    let total_chars = if is_placeholder {
+        0
+    } else {
+        normalized.chars().count()
+    };
+    let total_lines = if is_placeholder || normalized.is_empty() {
+        0
+    } else {
+        normalized.lines().count()
+    };
 
     #[cfg(feature = "tokens")]
     {
@@ -656,9 +664,21 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
         if text.len() <= MAX_TOKENIZE_BYTES {
             std::thread::spawn(move || {
                 let is_placeholder = is_placeholder_message(&text);
-                let tokens = if is_placeholder { 0 } else { count_tokens(&text) };
-                let chars = if is_placeholder { 0 } else { text.chars().count() };
-                let lines = if is_placeholder || text.is_empty() { 0 } else { text.lines().count() };
+                let tokens = if is_placeholder {
+                    0
+                } else {
+                    count_tokens(&text)
+                };
+                let chars = if is_placeholder {
+                    0
+                } else {
+                    text.chars().count()
+                };
+                let lines = if is_placeholder || text.is_empty() {
+                    0
+                } else {
+                    text.lines().count()
+                };
                 let label = format!("{chars} chars • {tokens} tokens • {lines} LOC");
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(app) = app_weak.upgrade() {
@@ -675,8 +695,14 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
 
     #[cfg(not(feature = "tokens"))]
     {
-        let total_tokens = if is_placeholder { 0 } else { count_tokens(&normalized) };
-        app.set_output_stats(format!("{total_chars} chars • {total_tokens} tokens • {total_lines} LOC").into());
+        let total_tokens = if is_placeholder {
+            0
+        } else {
+            count_tokens(&normalized)
+        };
+        app.set_output_stats(
+            format!("{total_chars} chars • {total_tokens} tokens • {total_lines} LOC").into(),
+        );
     }
 
     let displayed: String = if total_chars <= UI_OUTPUT_CHAR_LIMIT {
