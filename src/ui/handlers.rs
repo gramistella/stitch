@@ -138,7 +138,10 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
 
         parse_filters_from_ui(app, state);
 
-        let _ = start_fs_watcher(app, state);
+        // Only start fs watcher if it's not disabled
+        if !state.borrow().disable_fs_watcher {
+            let _ = start_fs_watcher(app, state);
+        }
         rebuild_tree_and_ui(app, state);
         update_last_refresh(app);
 
@@ -183,6 +186,27 @@ pub fn on_toggle_check(app: &AppWindow, state: &SharedState, index: usize) {
 
         // Reflect unsaved changes instead of autosaving
         update_save_button_state(app, state);
+    }
+}
+
+pub fn on_toggle_fs_watcher(app: &AppWindow, state: &SharedState) {
+    let disable_fs_watcher = app.get_disable_fs_watcher();
+    
+    {
+        let mut s = state.borrow_mut();
+        s.disable_fs_watcher = disable_fs_watcher;
+    }
+
+    if disable_fs_watcher {
+        // Stop the fs watcher
+        {
+            let mut s = state.borrow_mut();
+            s.watcher = None;
+            s.fs_event_rx = None;
+        }
+    } else {
+        // Start the fs watcher
+        let _ = start_fs_watcher(app, state);
     }
 }
 

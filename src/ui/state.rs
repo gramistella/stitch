@@ -47,6 +47,7 @@ pub struct AppState {
     pub gen_result_tx: Option<mpsc::Sender<(u64, String)>>,
     pub gen_result_rx: Option<mpsc::Receiver<(u64, String)>>,
     pub gen_pump_timer: slint::Timer,
+    pub disable_fs_watcher: bool,
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;

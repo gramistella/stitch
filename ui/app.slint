@@ -122,6 +122,7 @@ export component SaveProfileDialog inherits Window {
 component TopBar inherits HorizontalBox {
     in-out property <bool> hierarchy-only;
     in-out property <bool> dirs-only;
+    in-out property <bool> disable-fs-watcher;
     in property <string> last-refresh;
     in property <bool> show-copy-toast;
     in property <string> copy-toast-text;
@@ -130,8 +131,13 @@ component TopBar inherits HorizontalBox {
     callback new-window();
     callback generate-output();
     callback copy-output();
+    callback toggle-fs-watcher();
 
     spacing: 8px;
+    padding: 0px;
+
+    height: 100px;
+    width: 1300px;
 
     Rectangle { 
         horizontal-stretch: 1;
@@ -140,52 +146,85 @@ component TopBar inherits HorizontalBox {
             horizontal-stretch: 1;
             text: "Select Folder";
             width: 110px;
-            height: 30px;
+            height: 26px;
             clicked => { root.select-folder(); }
         }
     }
 
-    Button {
-        text: "New Window";
-        clicked => { root.new-window(); }
-    }
-
-    Rectangle { horizontal-stretch: 1; background: transparent; }
-
-    CheckBox { text: "Hierarchy Only";  checked <=> root.hierarchy-only;  height: 30px; width: 150px;  horizontal-stretch: 1; toggled => { root.generate-output(); }}
-    CheckBox { text: "Directories Only"; checked <=> root.dirs-only;      height: 30px; width: 160px;  horizontal-stretch: 1; toggled => { root.generate-output(); }}
-
-    Rectangle {
+    Rectangle { 
         horizontal-stretch: 1;
-        width: 290px;
-        height: 30px;
-        background: transparent;
-        Text {
-            width: parent.width;
-            height: parent.height;
-            text: root.last-refresh;
-            horizontal-alignment: right;
-            vertical-alignment: center;
-            overflow: elide;
+        width: 110px;
+        Button {
+            horizontal-stretch: 1;
+            text: "New Window";
+            width: 110px;
+            height: 26px;
+            clicked => { root.new-window(); }
         }
     }
 
-    Button {
-        text: "Force Refresh";
-        clicked => { root.generate-output(); }
+    Rectangle { width: 80px; background: transparent; }
+
+    VerticalBox {
+        spacing: 0px;
+        width: 320px;
+        alignment: LayoutAlignment.start;
+        
+        HorizontalBox {
+            spacing: 8px;
+            CheckBox { text: "Hierarchy Only";  checked <=> root.hierarchy-only;  height: 26px; width: 150px;  horizontal-stretch: 1; toggled => { root.generate-output(); }}
+            CheckBox { text: "Directories Only"; checked <=> root.dirs-only;      height: 26px; width: 160px;  horizontal-stretch: 1; toggled => { root.generate-output(); }}
+        }
+        
+        HorizontalBox {
+            CheckBox { text: "Disable FS Watcher"; checked <=> root.disable-fs-watcher; height: 26px; width: 180px; horizontal-stretch: 1; toggled => { root.toggle-fs-watcher(); }}
+        }
     }
 
-    Button {
-        text: "Copy Output";
-        clicked => { root.copy-output(); }
+    Rectangle { width: 120px; background: transparent; }
+
+    VerticalBox {
+        spacing: 0px;
+        width: 320px;
+        alignment: center;
+        Text {
+            text: root.last-refresh;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            overflow: elide;
+            height: 20px;
+        }
+        
+        VerticalBox {
+            
+            HorizontalBox {
+                
+                spacing: 8px;
+                Button {
+                    text: root.disable-fs-watcher ? "Refresh" : "Force Refresh";
+                    width: 110px;
+                    height: 26px;
+                    clicked => { root.generate-output(); }
+                }
+                
+                Button {
+                    text: "Copy Output";
+                    width: 110px;
+                    height: 26px;
+                    clicked => { root.copy-output(); }
+                }
+        }
+        Text {
+            horizontal-alignment: center;
+            visible: root.show-copy-toast;
+            text: root.copy-toast-text;
+            color: #2b8a3e;
+            font-weight: 10;
+        }
+        }
     }
 
-    Text {
-        visible: root.show-copy-toast;
-        text: root.copy-toast-text;
-        color: #2b8a3e;
-        font-weight: 10;
-    }
+    
 }
 
 component ProfilesPanel inherits VerticalBox {
@@ -448,6 +487,7 @@ export component AppWindow inherits Window {
     in-out property <string> remove-regex;
     in-out property <bool> hierarchy-only;
     in-out property <bool> dirs-only;
+    in-out property <bool> disable-fs-watcher;
     in-out property <string> last-refresh;
     in-out property <string> output-text;
     in-out property <[string]> output-lines;
@@ -467,6 +507,7 @@ export component AppWindow inherits Window {
     callback toggle-expand(index: int);
     callback toggle-check(index: int);
     callback generate-output();
+    callback toggle-fs-watcher();
     callback copy-output();
     callback select-from-text();
     callback new-window();
@@ -487,6 +528,7 @@ export component AppWindow inherits Window {
         TopBar {
             hierarchy-only <=> root.hierarchy-only;
             dirs-only <=> root.dirs-only;
+            disable-fs-watcher <=> root.disable-fs-watcher;
             last-refresh: root.last-refresh;
             show-copy-toast: root.show-copy-toast;
             copy-toast-text: root.copy-toast-text;
@@ -495,6 +537,7 @@ export component AppWindow inherits Window {
             new-window => { root.new-window(); }
             generate-output => { root.generate-output(); }
             copy-output => { root.copy-output(); }
+            toggle-fs-watcher => { root.toggle-fs-watcher(); }
         }
 
         // Main content row

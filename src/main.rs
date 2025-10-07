@@ -14,7 +14,7 @@ use ui::{
     AppState, AppWindow, Row, SelectFromTextDialog, apply_selection_from_text, on_check_updates,
     on_copy_output, on_filter_changed, on_generate_output, on_save_profile_as,
     on_save_profile_current, on_select_folder, on_select_profile, on_toggle_check,
-    on_toggle_expand,
+    on_toggle_expand, on_toggle_fs_watcher,
 };
 
 #[cfg(feature = "ui")]
@@ -108,6 +108,15 @@ fn spawn_window(registry: Rc<RefCell<Vec<AppWindow>>>) -> anyhow::Result<()> {
         app.on_generate_output(move || {
             if let Some(app) = app_weak.upgrade() {
                 on_generate_output(&app, &state);
+            }
+        });
+    }
+    {
+        let app_weak = app.as_weak();
+        let state = Rc::clone(&state);
+        app.on_toggle_fs_watcher(move || {
+            if let Some(app) = app_weak.upgrade() {
+                on_toggle_fs_watcher(&app, &state);
             }
         });
     }
