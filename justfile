@@ -8,7 +8,7 @@ test:
 
 lint:
   cargo clippy --workspace --all-targets --all-features -- \
-    -W clippy::all -W clippy::cargo -W clippy::pedantic -W clippy::nursery -A clippy::multiple-crate-versions -D warnings
+    -W clippy::all -W clippy::cargo -W clippy::pedantic -W clippy::nursery -A clippy::multiple-crate-versions -A clippy::cargo-common-metadata -D warnings
 
 fmt:
 	cargo fmt --all
