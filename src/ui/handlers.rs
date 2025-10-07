@@ -573,7 +573,7 @@ fn run_generation_job(job: GenerationJob) {
     use std::fmt::Write;
 
     let GenerationJob {
-        mut header,
+        header,
         files,
         selected_dir,
         remove_prefixes,
@@ -584,8 +584,8 @@ fn run_generation_job(job: GenerationJob) {
         seq,
     } = job;
 
-    header.push_str("\n=== FILE CONTENTS ===\n\n");
-    let mut out = header;
+    let mut skipped: Vec<(PathBuf, std::io::Error)> = Vec::new();
+    let mut file_sections = String::new();
 
     for fp in files {
         let rel: PathBuf = fp.strip_prefix(&selected_dir).map_or_else(
@@ -593,8 +593,12 @@ fn run_generation_job(job: GenerationJob) {
             std::path::Path::to_path_buf,
         );
 
-        let Ok(mut contents) = fs::read_to_string(&fp) else {
-            continue;
+        let mut contents = match fs::read_to_string(&fp) {
+            Ok(s) => s,
+            Err(e) => {
+                skipped.push((fp.clone(), e));
+                continue;
+            }
         };
 
         if !remove_prefixes.is_empty() {
@@ -620,12 +624,35 @@ fn run_generation_job(job: GenerationJob) {
         }
 
         let rel_display = rel.to_string_lossy().into_owned();
-        let _ = writeln!(out, "--- Start of file: {rel_display} ---");
-        out.push_str(&contents);
-        out.push('\n');
-        let _ = writeln!(out, "--- End of file: {rel_display} ---\n");
+        let _ = writeln!(file_sections, "--- Start of file: {rel_display} ---");
+        file_sections.push_str(&contents);
+        file_sections.push('\n');
+        let _ = writeln!(file_sections, "--- End of file: {rel_display} ---\n");
+    }
+    // Merge skipped file notes into the existing NOTES section within the header
+    let mut final_header = header;
+    if !skipped.is_empty() && final_header.contains("=== NOTES ===") {
+        let count = skipped.len();
+        let _ = writeln!(final_header, "Skipped files ({count}):");
+        for (path, err) in skipped {
+            let rel: PathBuf = path.strip_prefix(&selected_dir).map_or_else(
+                |_| PathBuf::from(path.to_string_lossy().to_string()),
+                std::path::Path::to_path_buf,
+            );
+            let reason = err.kind();
+            let msg = match reason {
+                std::io::ErrorKind::InvalidData => "not UTF-8".to_string(),
+                std::io::ErrorKind::PermissionDenied => "Permission denied".to_string(),
+                _ => err.to_string(),
+            };
+            let _ = writeln!(final_header, "- {}: {}", rel.to_string_lossy(), msg);
+        }
+        final_header.push('\n');
     }
 
+    final_header.push_str("\n=== FILE CONTENTS ===\n\n");
+    let mut out = final_header;
+    out.push_str(&file_sections);
     let _ = tx.send((seq, out));
 }
 
