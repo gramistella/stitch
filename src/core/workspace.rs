@@ -17,6 +17,14 @@ pub struct WorkspaceSettings {
     pub remove_regex: String,
     pub hierarchy_only: bool,
     pub dirs_only: bool,
+    #[serde(default)]
+    pub rust_remove_inline_comments: bool,
+    #[serde(default)]
+    pub rust_remove_doc_comments: bool,
+    #[serde(default)]
+    pub rust_function_signatures_only: bool,
+    #[serde(default)]
+    pub rust_signatures_only_filter: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

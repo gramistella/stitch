@@ -18,6 +18,7 @@ use stitch::core::{
     list_profiles, load_local_settings, load_profile, load_workspace, parse_extension_filters,
     parse_hierarchy_text, path_to_unix, render_unicode_tree_from_paths, save_local_settings,
     save_profile, save_workspace, scan_dir_to_node, split_prefix_list,
+    RustFilterOptions, is_rust_file_path, apply_rust_filters, signatures_filter_matches,
 };
 
 const UI_OUTPUT_CHAR_LIMIT: usize = 50_000;
@@ -102,6 +103,11 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
             app.set_remove_regex(ws.remove_regex.clone().into());
             app.set_hierarchy_only(ws.hierarchy_only);
             app.set_dirs_only(ws.dirs_only);
+            app.set_show_rust_section(false);
+            app.set_rust_remove_inline_comments(ws.rust_remove_inline_comments);
+            app.set_rust_remove_doc_comments(ws.rust_remove_doc_comments);
+            app.set_rust_function_signatures_only(ws.rust_function_signatures_only);
+            app.set_rust_signatures_only_filter(ws.rust_signatures_only_filter.clone().into());
 
             state.borrow_mut().workspace_baseline = Some(ws.clone());
         } else {
@@ -114,6 +120,10 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
                 remove_regex: app.get_remove_regex().to_string(),
                 hierarchy_only: app.get_hierarchy_only(),
                 dirs_only: app.get_dirs_only(),
+                rust_remove_inline_comments: app.get_rust_remove_inline_comments(),
+                rust_remove_doc_comments: app.get_rust_remove_doc_comments(),
+                rust_function_signatures_only: app.get_rust_function_signatures_only(),
+                rust_signatures_only_filter: app.get_rust_signatures_only_filter().to_string(),
             };
             let _ = save_workspace(&dir, &seed);
             state.borrow_mut().workspace_baseline = Some(seed);
@@ -319,6 +329,15 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
     let remove_regex_opt = { state.borrow().remove_regex.clone() };
     let files_to_read = selected_files.clone();
     let selected_dir_for_rel = selected_dir.clone();
+    let rust_opts = {
+        let s = state.borrow();
+        RustFilterOptions {
+            remove_inline_regular_comments: s.rust_remove_inline_comments,
+            remove_doc_comments: s.rust_remove_doc_comments,
+            function_signatures_only: s.rust_function_signatures_only,
+        }
+    };
+    let rust_sig_filter = app.get_rust_signatures_only_filter().to_string();
 
     // Ensure a result channel & start a UI-thread pump (if not already running)
     {
@@ -394,6 +413,20 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
             }
             if let Some(rr) = &remove_regex_opt {
                 contents = rr.replace_all(&contents, "").to_string();
+            }
+
+            if is_rust_file_path(&fp) {
+                // Signatures-only may be restricted via filter; compute rel path for matching
+                let rel_for_match = rel
+                    .iter()
+                    .map(|c| c.to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join("/");
+                let mut eff = rust_opts.clone();
+                if !rust_sig_filter.trim().is_empty() && !signatures_filter_matches(&rel_for_match, &rust_sig_filter) {
+                    eff.function_signatures_only = false;
+                }
+                contents = apply_rust_filters(&contents, &eff);
             }
 
             out.push_str(&format!(
@@ -490,6 +523,31 @@ pub fn rebuild_tree_and_ui(app: &AppWindow, state: &SharedState) {
     }
 
     refresh_flat_model(app, state);
+
+    // Detect presence of any .rs file to toggle Rust section visibility
+    let has_rs = {
+        let s = state.borrow();
+        let mut any = false;
+        if let Some(root) = &s.root_node {
+            fn rec(n: &Node, any: &mut bool) {
+                if *any { return; }
+                if !n.is_dir {
+                    if n.path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                        *any = true;
+                        return;
+                    }
+                }
+                for c in &n.children { rec(c, any); }
+            }
+            rec(root, &mut any);
+        }
+        any
+    };
+    app.set_show_rust_section(has_rs);
+    {
+        let mut s = state.borrow_mut();
+        s.has_rust_files = has_rs;
+    }
 }
 
 fn refresh_flat_model(app: &AppWindow, state: &SharedState) {
@@ -536,6 +594,10 @@ fn parse_filters_from_ui(app: &AppWindow, state: &SharedState) {
         st.remove_prefixes = split_prefix_list(&remove_prefix_raw);
         st.remove_regex_str = remove_regex_str.clone();
         st.remove_regex = compile_remove_regex_opt(remove_regex_str.as_deref());
+        st.rust_remove_inline_comments = app.get_rust_remove_inline_comments();
+        st.rust_remove_doc_comments = app.get_rust_remove_doc_comments();
+        st.rust_function_signatures_only = app.get_rust_function_signatures_only();
+        st.rust_signatures_only_filter = app.get_rust_signatures_only_filter().to_string();
     }
 
     let Some(dir) = state.borrow().selected_directory.clone() else {
@@ -988,6 +1050,10 @@ fn capture_profile_from_ui(app: &AppWindow, state: &SharedState, name: &str) -> 
         remove_regex: app.get_remove_regex().to_string(),
         hierarchy_only: app.get_hierarchy_only(),
         dirs_only: app.get_dirs_only(),
+        rust_remove_inline_comments: app.get_rust_remove_inline_comments(),
+        rust_remove_doc_comments: app.get_rust_remove_doc_comments(),
+        rust_function_signatures_only: app.get_rust_function_signatures_only(),
+        rust_signatures_only_filter: app.get_rust_signatures_only_filter().to_string(),
     };
 
     // NOTE: Preserve root selection by storing an empty relative path ("")
@@ -1026,6 +1092,10 @@ fn apply_profile_to_ui(app: &AppWindow, state: &SharedState, profile: &Profile) 
     app.set_remove_regex(profile.settings.remove_regex.clone().into());
     app.set_hierarchy_only(profile.settings.hierarchy_only);
     app.set_dirs_only(profile.settings.dirs_only);
+    app.set_rust_remove_inline_comments(profile.settings.rust_remove_inline_comments);
+    app.set_rust_remove_doc_comments(profile.settings.rust_remove_doc_comments);
+    app.set_rust_function_signatures_only(profile.settings.rust_function_signatures_only);
+    app.set_rust_signatures_only_filter(profile.settings.rust_signatures_only_filter.clone().into());
 
     app.set_profile_name(profile.name.clone().into());
 
@@ -1126,6 +1196,10 @@ pub fn on_save_profile_current(app: &AppWindow, state: &SharedState) {
             remove_regex: app.get_remove_regex().to_string(),
             hierarchy_only: app.get_hierarchy_only(),
             dirs_only: app.get_dirs_only(),
+            rust_remove_inline_comments: app.get_rust_remove_inline_comments(),
+            rust_remove_doc_comments: app.get_rust_remove_doc_comments(),
+            rust_function_signatures_only: app.get_rust_function_signatures_only(),
+            rust_signatures_only_filter: app.get_rust_signatures_only_filter().to_string(),
         };
 
         let _ = save_workspace(&project_root, &ws);
@@ -1273,6 +1347,10 @@ fn profiles_equal(a: &Profile, b: &Profile) -> bool {
         || sa.remove_regex != sb.remove_regex
         || sa.hierarchy_only != sb.hierarchy_only
         || sa.dirs_only != sb.dirs_only
+        || sa.rust_remove_inline_comments != sb.rust_remove_inline_comments
+        || sa.rust_remove_doc_comments != sb.rust_remove_doc_comments
+        || sa.rust_function_signatures_only != sb.rust_function_signatures_only
+        || sa.rust_signatures_only_filter != sb.rust_signatures_only_filter
     {
         return false;
     }
@@ -1310,6 +1388,10 @@ fn update_save_button_state(app: &AppWindow, state: &SharedState) {
             remove_regex: app.get_remove_regex().to_string(),
             hierarchy_only: app.get_hierarchy_only(),
             dirs_only: app.get_dirs_only(),
+            rust_remove_inline_comments: app.get_rust_remove_inline_comments(),
+            rust_remove_doc_comments: app.get_rust_remove_doc_comments(),
+            rust_function_signatures_only: app.get_rust_function_signatures_only(),
+            rust_signatures_only_filter: app.get_rust_signatures_only_filter().to_string(),
         };
 
         let baseline_opt = { state.borrow().workspace_baseline.clone() };
@@ -1480,6 +1562,9 @@ fn workspace_settings_equal(a: &WorkspaceSettings, b: &WorkspaceSettings) -> boo
         && a.remove_regex == b.remove_regex
         && a.hierarchy_only == b.hierarchy_only
         && a.dirs_only == b.dirs_only
+        && a.rust_remove_inline_comments == b.rust_remove_inline_comments
+        && a.rust_remove_doc_comments == b.rust_remove_doc_comments
+        && a.rust_function_signatures_only == b.rust_function_signatures_only
     // Note: we intentionally ignore `current_profile` here for dirtiness comparison
 }
 

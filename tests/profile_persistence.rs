@@ -30,6 +30,10 @@ fn sample_ws() -> WorkspaceSettings {
         remove_regex: "TODO:.*$".into(),
         hierarchy_only: false,
         dirs_only: false,
+        rust_remove_inline_comments: false,
+        rust_remove_doc_comments: false,
+        rust_function_signatures_only: false,
+        rust_signatures_only_filter: String::new(),
     }
 }
 

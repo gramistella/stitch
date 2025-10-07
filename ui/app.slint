@@ -241,6 +241,13 @@ component ProfilesPanel inherits VerticalBox {
     in-out property <string> remove-prefix;
     in-out property <string> remove-regex;
 
+    // Rust-specific filters
+    in-out property <bool> show-rust-section;
+    in-out property <bool> rust-remove-inline-comments;
+    in-out property <bool> rust-remove-doc-comments;
+    in-out property <bool> rust-function-signatures-only;
+    in-out property <string> rust-signatures-only-filter;
+
     // Notifications upward
     callback select-profile(index: int);
     callback save-profile();
@@ -367,6 +374,42 @@ component ProfilesPanel inherits VerticalBox {
                     value <=> root.remove-regex;
                     changed => { root.filter-changed(); }
                 }
+
+
+                // Rust-specific filters section
+                if (root.show-rust-section) : Rectangle {
+                    width: parent.width;
+                    height: 1px;
+                    background: Palette.border;
+                }
+                if (root.show-rust-section) : Text {
+                    text: "Rust-specific filters";
+                    font-weight: 10;
+                }
+                if (root.show-rust-section) : CheckBox {
+                    text: "Remove inline regular comments (// and /* */)";
+                    checked <=> root.rust-remove-inline-comments;
+                    toggled => { root.filter-changed(); }
+                }
+                if (root.show-rust-section) : CheckBox {
+                    text: "Remove doc comments (///, //!, /** */)";
+                    checked <=> root.rust-remove-doc-comments;
+                    toggled => { root.filter-changed(); }
+                }
+                if (root.show-rust-section) : CheckBox {
+                    text: "Function signatures only";
+                    checked <=> root.rust-function-signatures-only;
+                    toggled => { root.filter-changed(); }
+                }
+                if (root.show-rust-section && root.rust-function-signatures-only) : LabeledEdit {
+                    width: parent.width;
+                    label: "Signature-only files/folders (comma, * wildcard, e.g. src/*,tests/*,main.rs):";
+                    value <=> root.rust-signatures-only-filter;
+                    changed => { root.filter-changed(); }
+                }
+
+                // Bottom spacer
+                Rectangle { width: parent.width; height: 12px; }
             }
         }
     }
@@ -485,6 +528,11 @@ export component AppWindow inherits Window {
     in-out property <string> exclude-files;
     in-out property <string> remove-prefix;
     in-out property <string> remove-regex;
+    in-out property <bool> show-rust-section;
+    in-out property <bool> rust-remove-inline-comments;
+    in-out property <bool> rust-remove-doc-comments;
+    in-out property <bool> rust-function-signatures-only;
+    in-out property <string> rust-signatures-only-filter;
     in-out property <bool> hierarchy-only;
     in-out property <bool> dirs-only;
     in-out property <bool> disable-fs-watcher;
@@ -555,6 +603,11 @@ export component AppWindow inherits Window {
                 exclude-files <=> root.exclude-files;
                 remove-prefix <=> root.remove-prefix;
                 remove-regex <=> root.remove-regex;
+                show-rust-section <=> root.show-rust-section;
+                rust-remove-inline-comments <=> root.rust-remove-inline-comments;
+                rust-remove-doc-comments <=> root.rust-remove-doc-comments;
+                rust-function-signatures-only <=> root.rust-function-signatures-only;
+                rust-signatures-only-filter <=> root.rust-signatures-only-filter;
 
                 select-profile(index) => { root.select-profile(index); }
                 save-profile => { root.save-profile(); }

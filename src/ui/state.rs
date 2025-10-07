@@ -48,6 +48,13 @@ pub struct AppState {
     pub gen_result_rx: Option<mpsc::Receiver<(u64, String)>>,
     pub gen_pump_timer: slint::Timer,
     pub disable_fs_watcher: bool,
+
+    // Rust-specific filters and detection
+    pub has_rust_files: bool,
+    pub rust_remove_inline_comments: bool,
+    pub rust_remove_doc_comments: bool,
+    pub rust_function_signatures_only: bool,
+    pub rust_signatures_only_filter: String,
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;

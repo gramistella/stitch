@@ -48,6 +48,10 @@ fn no_clear_when_shared_profile_exists() {
             remove_regex: "".into(),
             hierarchy_only: false,
             dirs_only: false,
+            rust_remove_inline_comments: false,
+            rust_remove_doc_comments: false,
+            rust_function_signatures_only: false,
+            rust_signatures_only_filter: String::new(),
         },
         explicit: vec![],
     };
@@ -81,6 +85,10 @@ fn no_clear_when_local_profile_exists() {
             remove_regex: "".into(),
             hierarchy_only: false,
             dirs_only: false,
+            rust_remove_inline_comments: false,
+            rust_remove_doc_comments: false,
+            rust_function_signatures_only: false,
+            rust_signatures_only_filter: String::new(),
         },
         explicit: vec![],
     };
