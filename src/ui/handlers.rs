@@ -76,10 +76,12 @@ struct GenerationJob {
 struct NotesContext {
     exclude_dirs: Vec<String>,
     exclude_files: Vec<String>,
+    existing_excluded_dirs: HashSet<String>,
+    existing_excluded_files: HashSet<String>,
     include_exts: HashSet<String>,
     exclude_exts: HashSet<String>,
     remove_prefixes: Vec<String>,
-    has_remove_regex: bool,
+    remove_regex: Option<String>,
     comment_removal: CommentRemoval,
     signatures_filter: Option<String>,
 }
@@ -98,16 +100,6 @@ impl SelectedPresence {
         Self { entries }
     }
 
-    fn has_file(&self, rel: &str) -> bool {
-        self.entries.contains(rel)
-    }
-
-    fn has_dir(&self, rel: &str) -> bool {
-        self.entries
-            .iter()
-            .any(|p| p == rel || p.starts_with(&(rel.to_owned() + "/")))
-    }
-
     fn collect_present_extensions(&self, filters: &HashSet<String>) -> Vec<String> {
         let mut present = std::collections::BTreeSet::new();
         for rel in &self.entries {
@@ -123,6 +115,45 @@ impl SelectedPresence {
         }
         present.into_iter().collect()
     }
+}
+
+fn gather_existing_exclusions(
+    root: &Node,
+    dir_names: &[String],
+    file_names: &[String],
+) -> (HashSet<String>, HashSet<String>) {
+    let mut remaining_dirs: HashSet<&str> = dir_names.iter().map(String::as_str).collect();
+    let mut remaining_files: HashSet<&str> = file_names.iter().map(String::as_str).collect();
+
+    if remaining_dirs.is_empty() && remaining_files.is_empty() {
+        return (HashSet::new(), HashSet::new());
+    }
+
+    let mut found_dirs: HashSet<String> = HashSet::new();
+    let mut found_files: HashSet<String> = HashSet::new();
+    let mut stack: Vec<&Node> = vec![root];
+
+    while let Some(node) = stack.pop() {
+        if node.is_dir {
+            if remaining_dirs.remove(node.name.as_str()) {
+                found_dirs.insert(node.name.clone());
+            }
+            for child in &node.children {
+                if remaining_dirs.is_empty() && remaining_files.is_empty() {
+                    break;
+                }
+                stack.push(child);
+            }
+        } else if remaining_files.remove(node.name.as_str()) {
+            found_files.insert(node.name.clone());
+        }
+
+        if remaining_dirs.is_empty() && remaining_files.is_empty() {
+            break;
+        }
+    }
+
+    (found_dirs, found_files)
 }
 
 /* =============================== UI Actions =============================== */
@@ -618,17 +649,20 @@ fn run_generation_job(job: GenerationJob) {
     let _ = tx.send((seq, out));
 }
 
-fn note_excluded_dirs(ctx: &NotesContext, selected: &SelectedPresence) -> Option<String> {
+fn note_excluded_dirs(ctx: &NotesContext, _selected: &SelectedPresence) -> Option<String> {
     if ctx.exclude_dirs.is_empty() {
         return None;
     }
-    let mut present: Vec<String> = ctx
+    if ctx.existing_excluded_dirs.is_empty() {
+        return None;
+    }
+    let mut present: Vec<&str> = ctx
         .exclude_dirs
         .iter()
-        .filter(|d| selected.has_dir(d))
-        .cloned()
+        .filter(|d| ctx.existing_excluded_dirs.contains(*d))
+        .map(|d| d.as_str())
         .collect();
-    present.sort();
+    present.sort_unstable();
     if present.is_empty() {
         None
     } else {
@@ -636,17 +670,20 @@ fn note_excluded_dirs(ctx: &NotesContext, selected: &SelectedPresence) -> Option
     }
 }
 
-fn note_excluded_files(ctx: &NotesContext, selected: &SelectedPresence) -> Option<String> {
+fn note_excluded_files(ctx: &NotesContext, _selected: &SelectedPresence) -> Option<String> {
     if ctx.exclude_files.is_empty() {
         return None;
     }
-    let mut present: Vec<String> = ctx
+    if ctx.existing_excluded_files.is_empty() {
+        return None;
+    }
+    let mut present: Vec<&str> = ctx
         .exclude_files
         .iter()
-        .filter(|f| selected.has_file(f))
-        .cloned()
+        .filter(|f| ctx.existing_excluded_files.contains(*f))
+        .map(|f| f.as_str())
         .collect();
-    present.sort();
+    present.sort_unstable();
     if present.is_empty() {
         None
     } else {
@@ -679,8 +716,10 @@ fn note_remove_settings(ctx: &NotesContext) -> Vec<String> {
             ctx.remove_prefixes.join(", ")
         ));
     }
-    if ctx.has_remove_regex {
-        lines.push("Applied remove-regex".to_string());
+    if let Some(pattern) = ctx.remove_regex.as_ref() {
+        if !pattern.trim().is_empty() {
+            lines.push(format!("Applied remove-regex: {pattern}"));
+        }
     }
     lines
 }
@@ -713,13 +752,32 @@ fn build_notes_section(
 ) -> String {
     let ctx = {
         let s = state.borrow();
+
+        let mut exclude_dirs: Vec<String> = s
+            .exclude_dirs
+            .iter()
+            .filter(|dir| dir.as_str() != ".stitchworkspace")
+            .cloned()
+            .collect();
+        let mut exclude_files: Vec<String> = s.exclude_files.iter().cloned().collect();
+        exclude_dirs.sort_unstable();
+        exclude_files.sort_unstable();
+
+        let (existing_excluded_dirs, existing_excluded_files) = s
+            .root_node
+            .as_ref()
+            .map(|root| gather_existing_exclusions(root, &exclude_dirs, &exclude_files))
+            .unwrap_or_else(|| (HashSet::new(), HashSet::new()));
+
         NotesContext {
-            exclude_dirs: s.exclude_dirs.iter().cloned().collect(),
-            exclude_files: s.exclude_files.iter().cloned().collect(),
+            exclude_dirs,
+            exclude_files,
+            existing_excluded_dirs,
+            existing_excluded_files,
             include_exts: s.include_exts.clone(),
             exclude_exts: s.exclude_exts.clone(),
             remove_prefixes: s.remove_prefixes.clone(),
-            has_remove_regex: s.remove_regex.is_some(),
+            remove_regex: s.remove_regex_str.clone(),
             comment_removal: s.rust_ui.comment_removal,
             signatures_filter: s.rust_ui.signatures_filter.clone(),
         }
