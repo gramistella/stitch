@@ -12,13 +12,13 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::sync::mpsc;
 
 use stitch::core::{
-    Node, Profile, ProfileScope, WorkspaceSettings, clean_remove_regex,
-    collapse_consecutive_blank_lines, collect_selected_paths, compile_remove_regex_opt,
-    delete_profile, ensure_profiles_dirs, ensure_workspace_dir, gather_paths_set, is_ancestor_of,
-    list_profiles, load_local_settings, load_profile, load_workspace, parse_extension_filters,
-    parse_hierarchy_text, path_to_unix, render_unicode_tree_from_paths, save_local_settings,
-    save_profile, save_workspace, scan_dir_to_node, split_prefix_list,
-    RustFilterOptions, is_rust_file_path, apply_rust_filters, signatures_filter_matches,
+    Node, Profile, ProfileScope, RustFilterOptions, WorkspaceSettings, apply_rust_filters,
+    clean_remove_regex, collapse_consecutive_blank_lines, collect_selected_paths,
+    compile_remove_regex_opt, delete_profile, ensure_profiles_dirs, ensure_workspace_dir,
+    gather_paths_set, is_ancestor_of, is_rust_file_path, list_profiles, load_local_settings,
+    load_profile, load_workspace, parse_extension_filters, parse_hierarchy_text, path_to_unix,
+    render_unicode_tree_from_paths, save_local_settings, save_profile, save_workspace,
+    scan_dir_to_node, signatures_filter_matches, split_prefix_list,
 };
 
 const UI_OUTPUT_CHAR_LIMIT: usize = 50_000;
@@ -201,7 +201,7 @@ pub fn on_toggle_check(app: &AppWindow, state: &SharedState, index: usize) {
 
 pub fn on_toggle_fs_watcher(app: &AppWindow, state: &SharedState) {
     let disable_fs_watcher = app.get_disable_fs_watcher();
-    
+
     {
         let mut s = state.borrow_mut();
         s.disable_fs_watcher = disable_fs_watcher;
@@ -434,7 +434,9 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
                     .collect::<Vec<_>>()
                     .join("/");
                 let mut eff = rust_opts.clone();
-                if !rust_sig_filter.trim().is_empty() && !signatures_filter_matches(&rel_for_match, &rust_sig_filter) {
+                if !rust_sig_filter.trim().is_empty()
+                    && !signatures_filter_matches(&rel_for_match, &rust_sig_filter)
+                {
                     eff.function_signatures_only = false;
                 }
                 contents = apply_rust_filters(&contents, &eff);
@@ -457,7 +459,11 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
     });
 }
 
-fn build_notes_section(state: &SharedState, _project_root: &std::path::Path, rel_selected_paths: &[String]) -> String {
+fn build_notes_section(
+    state: &SharedState,
+    _project_root: &std::path::Path,
+    rel_selected_paths: &[String],
+) -> String {
     use std::collections::BTreeSet;
     let s = state.borrow();
     let mut lines: Vec<String> = Vec::new();
@@ -465,7 +471,11 @@ fn build_notes_section(state: &SharedState, _project_root: &std::path::Path, rel
     // Helpers: presence filtering
     let selected_set: BTreeSet<String> = rel_selected_paths.iter().cloned().collect();
     let exists_rel_file = |rel: &str| selected_set.contains(rel);
-    let exists_rel_dir = |rel: &str| selected_set.iter().any(|p| p == rel || p.starts_with(&(rel.to_string() + "/")));
+    let exists_rel_dir = |rel: &str| {
+        selected_set
+            .iter()
+            .any(|p| p == rel || p.starts_with(&(rel.to_string() + "/")))
+    };
 
     // Excluded directories that actually exist
     if !s.exclude_dirs.is_empty() {
@@ -474,7 +484,11 @@ fn build_notes_section(state: &SharedState, _project_root: &std::path::Path, rel
             .iter()
             .filter_map(|d| {
                 let drel = d.as_str();
-                if exists_rel_dir(drel) { Some(drel.to_string()) } else { None }
+                if exists_rel_dir(drel) {
+                    Some(drel.to_string())
+                } else {
+                    None
+                }
             })
             .collect();
         present.sort();
@@ -488,7 +502,13 @@ fn build_notes_section(state: &SharedState, _project_root: &std::path::Path, rel
         let mut present: Vec<String> = s
             .exclude_files
             .iter()
-            .filter_map(|f| if exists_rel_file(f) { Some(f.clone()) } else { None })
+            .filter_map(|f| {
+                if exists_rel_file(f) {
+                    Some(f.clone())
+                } else {
+                    None
+                }
+            })
             .collect();
         present.sort();
         if !present.is_empty() {
@@ -500,31 +520,50 @@ fn build_notes_section(state: &SharedState, _project_root: &std::path::Path, rel
     if !s.include_exts.is_empty() {
         let mut present: BTreeSet<String> = BTreeSet::new();
         for rel in rel_selected_paths {
-            if let Some(ext) = std::path::Path::new(rel).extension().and_then(|e| e.to_str()) {
+            if let Some(ext) = std::path::Path::new(rel)
+                .extension()
+                .and_then(|e| e.to_str())
+            {
                 let dot = format!(".{}", ext.to_lowercase());
-                if s.include_exts.contains(&dot) { present.insert(dot); }
+                if s.include_exts.contains(&dot) {
+                    present.insert(dot);
+                }
             }
         }
         if !present.is_empty() {
-            lines.push(format!("Included extensions: {}", present.into_iter().collect::<Vec<_>>().join(", ")));
+            lines.push(format!(
+                "Included extensions: {}",
+                present.into_iter().collect::<Vec<_>>().join(", ")
+            ));
         }
     }
     if !s.exclude_exts.is_empty() {
         let mut present: BTreeSet<String> = BTreeSet::new();
         for rel in rel_selected_paths {
-            if let Some(ext) = std::path::Path::new(rel).extension().and_then(|e| e.to_str()) {
+            if let Some(ext) = std::path::Path::new(rel)
+                .extension()
+                .and_then(|e| e.to_str())
+            {
                 let dot = format!(".{}", ext.to_lowercase());
-                if s.exclude_exts.contains(&dot) { present.insert(dot); }
+                if s.exclude_exts.contains(&dot) {
+                    present.insert(dot);
+                }
             }
         }
         if !present.is_empty() {
-            lines.push(format!("Excluded extensions: {}", present.into_iter().collect::<Vec<_>>().join(", ")));
+            lines.push(format!(
+                "Excluded extensions: {}",
+                present.into_iter().collect::<Vec<_>>().join(", ")
+            ));
         }
     }
 
     // Remove prefixes (only if enabled and selected files contain any line starting with them). We keep a light note.
     if !s.remove_prefixes.is_empty() {
-        lines.push(format!("Removed lines starting with: {}", s.remove_prefixes.join(", ")));
+        lines.push(format!(
+            "Removed lines starting with: {}",
+            s.remove_prefixes.join(", ")
+        ));
     }
     if s.remove_regex.is_some() {
         lines.push("Applied remove-regex".to_string());
@@ -541,7 +580,10 @@ fn build_notes_section(state: &SharedState, _project_root: &std::path::Path, rel
         if s.rust_signatures_only_filter.trim().is_empty() {
             lines.push("Functions bodies omitted (signatures only) for all Rust files".to_string());
         } else {
-            lines.push(format!("Functions bodies omitted (signatures only) for: {}", s.rust_signatures_only_filter));
+            lines.push(format!(
+                "Functions bodies omitted (signatures only) for: {}",
+                s.rust_signatures_only_filter
+            ));
         }
     }
 
@@ -632,14 +674,18 @@ pub fn rebuild_tree_and_ui(app: &AppWindow, state: &SharedState) {
         let mut any = false;
         if let Some(root) = &s.root_node {
             fn rec(n: &Node, any: &mut bool) {
-                if *any { return; }
+                if *any {
+                    return;
+                }
                 if !n.is_dir {
                     if n.path.extension().and_then(|e| e.to_str()) == Some("rs") {
                         *any = true;
                         return;
                     }
                 }
-                for c in &n.children { rec(c, any); }
+                for c in &n.children {
+                    rec(c, any);
+                }
             }
             rec(root, &mut any);
         }
@@ -1197,7 +1243,9 @@ fn apply_profile_to_ui(app: &AppWindow, state: &SharedState, profile: &Profile) 
     app.set_rust_remove_inline_comments(profile.settings.rust_remove_inline_comments);
     app.set_rust_remove_doc_comments(profile.settings.rust_remove_doc_comments);
     app.set_rust_function_signatures_only(profile.settings.rust_function_signatures_only);
-    app.set_rust_signatures_only_filter(profile.settings.rust_signatures_only_filter.clone().into());
+    app.set_rust_signatures_only_filter(
+        profile.settings.rust_signatures_only_filter.clone().into(),
+    );
 
     app.set_profile_name(profile.name.clone().into());
 
@@ -1667,7 +1715,7 @@ fn workspace_settings_equal(a: &WorkspaceSettings, b: &WorkspaceSettings) -> boo
         && a.rust_remove_inline_comments == b.rust_remove_inline_comments
         && a.rust_remove_doc_comments == b.rust_remove_doc_comments
         && a.rust_function_signatures_only == b.rust_function_signatures_only
-        && a.rust_signatures_only_filter == b.rust_signatures_only_filter 
+        && a.rust_signatures_only_filter == b.rust_signatures_only_filter
     // Note: we intentionally ignore `current_profile` here for dirtiness comparison
 }
 

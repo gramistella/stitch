@@ -1,8 +1,12 @@
-use stitch::core::apply_rust_filters;
 use stitch::core::RustFilterOptions;
+use stitch::core::apply_rust_filters;
 
 fn opts() -> RustFilterOptions {
-    RustFilterOptions { remove_inline_regular_comments: false, remove_doc_comments: false, function_signatures_only: true }
+    RustFilterOptions {
+        remove_inline_regular_comments: false,
+        remove_doc_comments: false,
+        function_signatures_only: true,
+    }
 }
 
 #[test]
@@ -27,12 +31,12 @@ fn t() { assert_eq!(1,1); }
 
 #[test]
 fn keeps_raw_strings_and_comments_outside_fn() {
-    let src = r#"
+    let src = r##"
 // a line
 let s = r#"not a { brace }"#;
 fn f(x: i32) { let y = { 1 + 2 }; }
 // trailing
-"#;
+"##;
     let got = apply_rust_filters(src, &opts());
     assert!(got.contains("// a line"));
     assert!(got.contains("r#\"not a { brace }\"#"));
@@ -50,5 +54,3 @@ fn g() { if true { { { 1; } } } }
     assert!(got.contains("fn g"));
     assert!(got.ends_with(";\n"));
 }
-
-

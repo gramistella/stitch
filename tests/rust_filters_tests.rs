@@ -1,4 +1,4 @@
-use stitch::core::{apply_rust_filters, is_rust_file_path, RustFilterOptions};
+use stitch::core::{RustFilterOptions, apply_rust_filters, is_rust_file_path};
 
 #[test]
 fn detect_rust_path() {
@@ -92,7 +92,10 @@ fn signatures_filter_matches_variants() {
     assert!(signatures_filter_matches("src/main.rs", "src/*"));
     assert!(signatures_filter_matches("tests/foo.rs", "tests/*"));
     assert!(signatures_filter_matches("src/lib.rs", "lib.rs"));
-    assert!(signatures_filter_matches("pkg/src/lib.rs", "lib.rs,tests/*"));
+    assert!(signatures_filter_matches(
+        "pkg/src/lib.rs",
+        "lib.rs,tests/*"
+    ));
     assert!(!signatures_filter_matches("src/lib.rs", "tests/*,main.rs"));
     assert!(!signatures_filter_matches("src/lib.rs", "   "));
 }
@@ -116,20 +119,23 @@ fn per_file_signatures_only_respects_filter() {
         let mut e = opts_on.clone();
         e.function_signatures_only = false;
         e
-    } else { opts_on.clone() };
+    } else {
+        opts_on.clone()
+    };
     let got_src = apply_rust_filters(src, &eff_src);
     assert!(got_src.contains("fn a"));
     assert!(got_src.contains("x: i32"));
     assert!(got_src.contains("fn b"));
 
     // tests/mod.rs -> not signature-only
-    let eff_tests = if !filter.trim().is_empty() && !signatures_filter_matches("tests/mod.rs", filter) {
-        let mut e = opts_on.clone();
-        e.function_signatures_only = false;
-        e
-    } else { opts_on.clone() };
+    let eff_tests =
+        if !filter.trim().is_empty() && !signatures_filter_matches("tests/mod.rs", filter) {
+            let mut e = opts_on.clone();
+            e.function_signatures_only = false;
+            e
+        } else {
+            opts_on.clone()
+        };
     let got_tests = apply_rust_filters(src, &eff_tests);
     assert_eq!(got_tests, src);
 }
-
-

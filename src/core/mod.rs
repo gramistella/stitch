@@ -11,11 +11,11 @@ pub struct Node {
 }
 
 mod fs;
+mod rust_filters;
 mod text;
 mod workspace;
-mod rust_filters;
 
 pub use fs::*;
+pub use rust_filters::*;
 pub use text::*;
 pub use workspace::*;
-pub use rust_filters::*;

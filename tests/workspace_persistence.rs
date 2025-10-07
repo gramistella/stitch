@@ -54,9 +54,18 @@ fn save_then_load_roundtrip_and_overwrite_is_atomic() {
     assert_eq!(loaded1.remove_regex, s1.remove_regex);
     assert_eq!(loaded1.hierarchy_only, s1.hierarchy_only);
     assert_eq!(loaded1.dirs_only, s1.dirs_only);
-    assert_eq!(loaded1.rust_remove_inline_comments, s1.rust_remove_inline_comments);
-    assert_eq!(loaded1.rust_remove_doc_comments, s1.rust_remove_doc_comments);
-    assert_eq!(loaded1.rust_function_signatures_only, s1.rust_function_signatures_only);
+    assert_eq!(
+        loaded1.rust_remove_inline_comments,
+        s1.rust_remove_inline_comments
+    );
+    assert_eq!(
+        loaded1.rust_remove_doc_comments,
+        s1.rust_remove_doc_comments
+    );
+    assert_eq!(
+        loaded1.rust_function_signatures_only,
+        s1.rust_function_signatures_only
+    );
 
     let mut s2 = loaded1.clone();
     s2.ext_filter = ".rs".into();
