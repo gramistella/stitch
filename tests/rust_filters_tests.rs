@@ -76,7 +76,7 @@ trait T {
 
 #[test]
 fn function_signatures_only_handles_impl_lifetimes() {
-    let src = r#"
+    let src = r"
 impl<'a> PrefixBuckets<'a> {
     fn new(prefixes: &'a [String]) -> Self {
         let mut buckets: [Vec<&'a [u8]>; 256] = std::array::from_fn(|_| Vec::new());
@@ -93,7 +93,7 @@ impl<'a> PrefixBuckets<'a> {
         slice.first().is_some()
     }
 }
-"#;
+";
     let opts = RustFilterOptions {
         remove_inline_regular_comments: false,
         remove_doc_comments: false,

@@ -222,11 +222,10 @@ impl<'a> SignatureReducer<'a> {
             b'\'' => {
                 if is_probable_lifetime(self.bytes, self.len, self.index) {
                     self.index = skip_lifetime(self.bytes, self.len, self.index);
-                    true
                 } else {
                     self.index = scan_string_literal(self.bytes, self.len, self.index, b'\'');
-                    true
                 }
+                true
             }
             b'r' => {
                 let next = scan_raw_string_literal(self.bytes, self.len, self.index);

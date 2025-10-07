@@ -122,7 +122,7 @@ impl SelectedPresence {
             std::path::Path::new(rel)
                 .extension()
                 .and_then(|ext| ext.to_str())
-                .map_or(false, |ext| ext.eq_ignore_ascii_case("rs"))
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("rs"))
         })
     }
 
@@ -639,7 +639,7 @@ fn note_excluded_dirs(ctx: &NotesContext, _selected: &SelectedPresence) -> Optio
         .exclude_dirs
         .iter()
         .filter(|d| ctx.existing_excluded_dirs.contains(*d))
-        .map(|d| d.as_str())
+        .map(std::string::String::as_str)
         .collect();
     present.sort_unstable();
     if present.is_empty() {
@@ -660,7 +660,7 @@ fn note_excluded_files(ctx: &NotesContext, _selected: &SelectedPresence) -> Opti
         .exclude_files
         .iter()
         .filter(|f| ctx.existing_excluded_files.contains(*f))
-        .map(|f| f.as_str())
+        .map(std::string::String::as_str)
         .collect();
     present.sort_unstable();
     if present.is_empty() {
@@ -695,10 +695,10 @@ fn note_remove_settings(ctx: &NotesContext) -> Vec<String> {
             ctx.remove_prefixes.join(", ")
         ));
     }
-    if let Some(pattern) = ctx.remove_regex.as_ref() {
-        if !pattern.trim().is_empty() {
-            lines.push(format!("Applied remove-regex: {pattern}"));
-        }
+    if let Some(pattern) = ctx.remove_regex.as_ref()
+        && !pattern.trim().is_empty()
+    {
+        lines.push(format!("Applied remove-regex: {pattern}"));
     }
     lines
 }
@@ -841,7 +841,7 @@ pub fn rebuild_tree_and_ui(app: &AppWindow, state: &SharedState) {
         }
     }
     {
-        let (root, snapshot, stats) = {
+        let (root, snapshot, scan_stats) = {
             let s = state.borrow();
             let dir = s.selected_directory.as_ref().unwrap().clone();
             let include = s.include_exts.clone();
@@ -857,8 +857,8 @@ pub fn rebuild_tree_and_ui(app: &AppWindow, state: &SharedState) {
             let mut s = state.borrow_mut();
             s.path_snapshot = Some(snapshot);
             s.root_node = Some(root);
-            s.existing_excluded_dirs = stats.excluded_dirs_found;
-            s.existing_excluded_files = stats.excluded_files_found;
+            s.existing_excluded_dirs = scan_stats.excluded_dirs_found;
+            s.existing_excluded_files = scan_stats.excluded_files_found;
             s.remove_regex = compile_remove_regex_opt(s.remove_regex_str.as_deref());
         }
     }
