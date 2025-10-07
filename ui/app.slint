@@ -379,6 +379,13 @@ component ProfilesPanel inherits VerticalBox {
 
 
                 // Rust-specific filters section
+
+                // Conditional spacer between filters and Rust-specific filters section
+                if (root.show-rust-section) : Rectangle {
+                    width: parent.width; 
+                    height: 12px;
+                }
+
                 if (root.show-rust-section) : Rectangle {
                     width: parent.width;
                     height: 1px;
@@ -410,7 +417,7 @@ component ProfilesPanel inherits VerticalBox {
                     changed => { root.filter-changed(); }
                 }
 
-                // Bottom spacer
+                // Bottom spacer (Must always be last)
                 Rectangle { width: parent.width; height: 12px; }
             }
         }
