@@ -116,6 +116,21 @@ impl SelectedPresence {
         }
         present.into_iter().collect()
     }
+
+    fn has_rust_files(&self) -> bool {
+        self.entries.iter().any(|rel| {
+            std::path::Path::new(rel)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map_or(false, |ext| ext.eq_ignore_ascii_case("rs"))
+        })
+    }
+
+    fn any_matches_filter(&self, filter: &str) -> bool {
+        self.entries
+            .iter()
+            .any(|rel| signatures_filter_matches(rel, filter))
+    }
 }
 
 /* =============================== UI Actions =============================== */
@@ -688,7 +703,7 @@ fn note_remove_settings(ctx: &NotesContext) -> Vec<String> {
     lines
 }
 
-fn note_rust_settings(ctx: &NotesContext) -> Vec<String> {
+fn note_rust_settings(ctx: &NotesContext, selected: &SelectedPresence) -> Vec<String> {
     let mut lines = Vec::new();
     let comment_removal = ctx.comment_removal;
     if comment_removal.removes_inline() {
@@ -698,9 +713,14 @@ fn note_rust_settings(ctx: &NotesContext) -> Vec<String> {
         lines.push("Removed Rust doc comments (///, //!, /** */)".to_string());
     }
     if let Some(filter) = ctx.signatures_filter.as_ref() {
-        if filter.trim().is_empty() {
-            lines.push("Functions bodies omitted (signatures only) for all Rust files".to_string());
-        } else {
+        let trimmed = filter.trim();
+        if trimmed.is_empty() {
+            if selected.has_rust_files() {
+                lines.push(
+                    "Functions bodies omitted (signatures only) for all Rust files".to_string(),
+                );
+            }
+        } else if selected.any_matches_filter(trimmed) {
             lines.push(format!(
                 "Functions bodies omitted (signatures only) for: {filter}"
             ));
@@ -763,7 +783,7 @@ fn build_notes_section(
     }
     lines.extend(note_extension_filters(&ctx, &selected));
     lines.extend(note_remove_settings(&ctx));
-    lines.extend(note_rust_settings(&ctx));
+    lines.extend(note_rust_settings(&ctx, &selected));
 
     lines.join("\n")
 }
