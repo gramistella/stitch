@@ -67,7 +67,7 @@ fn save_then_load_roundtrip_and_overwrite_is_atomic() {
         s1.rust_function_signatures_only
     );
 
-    let mut s2 = loaded1.clone();
+    let mut s2 = loaded1;
     s2.ext_filter = ".rs".into();
     s2.hierarchy_only = true;
     s2.rust_signatures_only_filter = "src/*,tests/*".into();

@@ -11,7 +11,6 @@ fn path_to_unix_non_utf8_replaces_invalid() {
     let s = path_to_unix(&p);
     assert!(
         s.contains('\u{FFFD}'),
-        "expected replacement char in '{}'",
-        s
+        "expected replacement char in '{s}'"
     );
 }

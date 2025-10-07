@@ -28,13 +28,13 @@ let s = r#"// not a comment inside raw"#;
 
 #[test]
 fn remove_doc_comments_line_and_block() {
-    let src = r#"
+    let src = r"
 /// doc line
 //! crate doc
 /** block doc */
 /*! inner block doc */
 fn f() {}
-"#;
+";
     let opts = RustFilterOptions {
         remove_inline_regular_comments: false,
         remove_doc_comments: true,
@@ -47,7 +47,7 @@ fn f() {}
 
 #[test]
 fn function_signatures_only_extracts_free_impl_trait_methods() {
-    let src = r#"
+    let src = r"
 pub fn free<T>(x: T) -> Result<(), ()> { Ok(()) }
 
 impl Foo {
@@ -57,7 +57,7 @@ impl Foo {
 trait T {
     fn t(&self);
 }
-"#;
+";
     let opts = RustFilterOptions {
         remove_inline_regular_comments: false,
         remove_doc_comments: false,
@@ -130,11 +130,11 @@ fn per_file_signatures_only_respects_filter() {
     // tests/mod.rs -> not signature-only
     let eff_tests =
         if !filter.trim().is_empty() && !signatures_filter_matches("tests/mod.rs", filter) {
-            let mut e = opts_on.clone();
+            let mut e = opts_on;
             e.function_signatures_only = false;
             e
         } else {
-            opts_on.clone()
+            opts_on
         };
     let got_tests = apply_rust_filters(src, &eff_tests);
     assert_eq!(got_tests, src);

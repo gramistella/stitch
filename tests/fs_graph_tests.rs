@@ -121,8 +121,8 @@ fn test_collect_selected_paths_inheritance() {
     let mut explicit: HashMap<PathBuf, bool> = HashMap::new();
     let sub1_path = root.join("sub1");
     let b_rs_path = root.join("b.rs");
-    explicit.insert(sub1_path.clone(), true);
-    explicit.insert(b_rs_path.clone(), true);
+    explicit.insert(sub1_path, true);
+    explicit.insert(b_rs_path, true);
 
     let mut files = Vec::new();
     let mut dirs = Vec::new();

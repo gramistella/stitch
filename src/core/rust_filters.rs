@@ -9,12 +9,14 @@ pub struct RustFilterOptions {
 }
 
 /// Returns true if the given path ends with ".rs" (case-sensitive like Rust filenames on most systems).
+#[must_use] 
 pub fn is_rust_file_path(path: &std::path::Path) -> bool {
     path.extension().and_then(|e| e.to_str()) == Some("rs")
 }
 
 /// Apply Rust-specific filters to a source file's string contents.
 /// This function only transforms when at least one option is enabled; otherwise returns input as-is.
+#[must_use] 
 pub fn apply_rust_filters(source: &str, opts: &RustFilterOptions) -> String {
     if !(opts.remove_inline_regular_comments
         || opts.remove_doc_comments
@@ -421,6 +423,7 @@ fn transform_functions_to_signatures(src: &str) -> String {
 /// comma-separated glob-like patterns in `filter`. Supports `*` wildcard; if a pattern
 /// contains no slash, it matches against the basename only. Empty/whitespace-only filter
 /// yields false (i.e., no restriction by itself).
+#[must_use] 
 pub fn signatures_filter_matches(rel_path: &str, filter: &str) -> bool {
     let rel = rel_path;
     let name = rel.rsplit('/').next().unwrap_or(rel);
@@ -533,11 +536,7 @@ fn remove_comments_textual(input: &str, remove_inline: bool, remove_doc: bool) -
             S::Code => {
                 if i + 1 < n && bytes[i] == b'/' && bytes[i + 1] == b'/' {
                     // Detect doc line comments: /// or //!
-                    let is_doc = if i + 2 < n && (bytes[i + 2] == b'/' || bytes[i + 2] == b'!') {
-                        true
-                    } else {
-                        false
-                    };
+                    let is_doc = i + 2 < n && (bytes[i + 2] == b'/' || bytes[i + 2] == b'!');
                     let should_remove = if is_doc { remove_doc } else { remove_inline };
                     if should_remove {
                         // trim trailing spaces before the comment marker, and keep a single newline
@@ -551,20 +550,15 @@ fn remove_comments_textual(input: &str, remove_inline: bool, remove_doc: bool) -
                             out.push('\n');
                         }
                         continue;
-                    } else {
-                        // keep as-is
-                        out.push_str("//");
-                        i += 2;
-                        continue;
                     }
+                    // keep as-is
+                    out.push_str("//");
+                    i += 2;
+                    continue;
                 }
                 if i + 1 < n && bytes[i] == b'/' && bytes[i + 1] == b'*' {
                     // Block comment start; determine doc style /** or /*!.
-                    let is_doc = if i + 2 < n && (bytes[i + 2] == b'*' || bytes[i + 2] == b'!') {
-                        true
-                    } else {
-                        false
-                    };
+                    let is_doc = i + 2 < n && (bytes[i + 2] == b'*' || bytes[i + 2] == b'!');
                     let should_remove = if is_doc { remove_doc } else { remove_inline };
                     // Emit the opener if we are preserving
                     if !should_remove {

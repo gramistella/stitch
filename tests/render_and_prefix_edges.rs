@@ -20,7 +20,7 @@ fn render_tree_deduplicates_duplicate_paths() {
 fn strip_ignores_empty_prefix_entries() {
     let src = "a = 1 // keep\n# full\nb = 2\n";
     // The empty string in the list must be ignored (otherwise it would nuke everything).
-    let out = strip_lines_and_inline_comments(src, &["".into(), "//".into(), "#".into()]);
+    let out = strip_lines_and_inline_comments(src, &[String::new(), "//".into(), "#".into()]);
     assert_eq!(out, "a = 1\nb = 2\n");
 }
 

@@ -4,8 +4,8 @@ use stitch::core::*;
 use tempfile::TempDir;
 
 /// This test documents current behavior:
-/// - parse_extension_filters will happily accept ".tar.gz"
-/// - scan_dir_to_node uses only the LAST extension (via Path::extension), so ".tar.gz" files
+/// - `parse_extension_filters` will happily accept ".tar.gz"
+/// - `scan_dir_to_node` uses only the LAST extension (via `Path::extension`), so ".tar.gz" files
 ///   are considered ".gz" for matching.
 #[test]
 fn include_multidot_extension_documents_last_segment_behavior() {

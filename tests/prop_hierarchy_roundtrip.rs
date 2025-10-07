@@ -3,12 +3,12 @@ use stitch::core::{parse_hierarchy_text, render_unicode_tree_from_paths};
 
 fn segment() -> impl Strategy<Value = String> {
     // simple dir/file name parts, no slashes
-    "[A-Za-z0-9_\\-]{1,8}".prop_map(|s| s.to_string())
+    "[A-Za-z0-9_\\-]{1,8}".prop_map(|s| s)
 }
 
 fn ext() -> impl Strategy<Value = String> {
     // small alpha extension
-    "[a-z]{1,3}".prop_map(|s| s.to_string())
+    "[a-z]{1,3}".prop_map(|s| s)
 }
 
 fn path() -> impl Strategy<Value = String> {
@@ -38,7 +38,7 @@ proptest! {
         let tree = render_unicode_tree_from_paths(&paths, Some("root"));
         let parsed = parse_hierarchy_text(&tree).expect("root line is present");
 
-        for p in paths.into_iter().collect::<std::collections::HashSet<_>>() {
+        for p in paths.into_iter() {
             prop_assert!(parsed.contains(&p),
                 "parsed set must contain original path: {p}\nRendered:\n{tree}");
         }

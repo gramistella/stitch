@@ -7,6 +7,7 @@ use std::{
 
 /* =========================== Filesystem & paths ============================ */
 
+#[must_use] 
 pub fn path_to_unix(p: &Path) -> String {
     let mut s = String::new();
     for (i, comp) in p.iter().enumerate() {
@@ -18,12 +19,14 @@ pub fn path_to_unix(p: &Path) -> String {
     s
 }
 
+#[must_use] 
 pub fn is_ancestor_of(ancestor: &Path, p: &Path) -> bool {
     let anc = normalize_path(ancestor);
     let pp = normalize_path(p);
     pp.starts_with(&anc)
 }
 
+#[must_use] 
 pub fn normalize_path(p: &Path) -> PathBuf {
     if let Ok(c) = dunce::canonicalize(p) {
         return c;
@@ -75,6 +78,7 @@ pub fn normalize_path(p: &Path) -> PathBuf {
     cleaned
 }
 
+#[must_use] 
 pub fn scan_dir_to_node(
     dir: &Path,
     include_exts: &HashSet<String>,
@@ -208,6 +212,7 @@ pub fn scan_dir_to_node(
     node
 }
 
+#[must_use] 
 pub fn gather_paths_set(root: &Node) -> HashSet<PathBuf> {
     let mut set = HashSet::new();
     fn rec(n: &Node, set: &mut HashSet<PathBuf>) {
@@ -220,7 +225,8 @@ pub fn gather_paths_set(root: &Node) -> HashSet<PathBuf> {
     set
 }
 
-pub fn dir_contains_file(node: &Node) -> bool {
+#[must_use] 
+pub const fn dir_contains_file(node: &Node) -> bool {
     !node.is_dir || node.has_children
 }
 
@@ -250,6 +256,7 @@ pub fn collect_selected_paths(
     }
 }
 
+#[must_use] 
 pub fn drain_channel_nonblocking<T>(rx: &std::sync::mpsc::Receiver<T>) -> bool {
     let mut any = false;
     while rx.try_recv().is_ok() {
@@ -258,6 +265,7 @@ pub fn drain_channel_nonblocking<T>(rx: &std::sync::mpsc::Receiver<T>) -> bool {
     any
 }
 
+#[must_use] 
 pub fn is_event_path_relevant(
     project_root: &std::path::Path,
     abs_path: &std::path::Path,

@@ -136,7 +136,7 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
         refresh_profiles_ui(app, state);
 
         if let Some(local_settings) = load_local_settings(&dir)
-            && let Some(name) = local_settings.current_profile.clone()
+            && let Some(name) = local_settings.current_profile
         {
             if let Some((profile, _)) = load_profile(&dir, &name) {
                 apply_profile_to_ui(app, state, &profile);
@@ -318,7 +318,7 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
         if !notes.trim().is_empty() {
             header.push_str("\n=== NOTES ===\n\n");
             header.push_str(&notes);
-            header.push_str("\n");
+            header.push('\n');
         }
     }
 
@@ -338,8 +338,8 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
     // Snapshot params for the worker
     let remove_prefixes = { state.borrow().remove_prefixes.clone() };
     let remove_regex_opt = { state.borrow().remove_regex.clone() };
-    let files_to_read = selected_files.clone();
-    let selected_dir_for_rel = selected_dir.clone();
+    let files_to_read = selected_files;
+    let selected_dir_for_rel = selected_dir;
     let rust_opts = {
         let s = state.borrow();
         RustFilterOptions {
@@ -409,9 +409,7 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
 
         for fp in files_to_read {
             let rel: PathBuf = fp
-                .strip_prefix(&selected_dir_for_rel)
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|_| PathBuf::from(fp.file_name().unwrap_or_default()));
+                .strip_prefix(&selected_dir_for_rel).map_or_else(|_| PathBuf::from(fp.file_name().unwrap_or_default()), std::path::Path::to_path_buf);
 
             let mut contents = match fs::read_to_string(&fp) {
                 Ok(c) => c,
@@ -677,12 +675,11 @@ pub fn rebuild_tree_and_ui(app: &AppWindow, state: &SharedState) {
                 if *any {
                     return;
                 }
-                if !n.is_dir {
-                    if n.path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                if !n.is_dir
+                    && n.path.extension().and_then(|e| e.to_str()) == Some("rs") {
                         *any = true;
                         return;
                     }
-                }
                 for c in &n.children {
                     rec(c, any);
                 }
@@ -719,8 +716,8 @@ fn parse_filters_from_ui(app: &AppWindow, state: &SharedState) {
 
     let (include_exts, exclude_exts) = parse_extension_filters(&ext_raw);
 
-    let mut exclude_dirs_set = split_csv_set(&exclude_dirs_raw.clone().into());
-    let exclude_files_set = split_csv_set(&exclude_files_raw.clone().into());
+    let mut exclude_dirs_set = split_csv_set(&exclude_dirs_raw.into());
+    let exclude_files_set = split_csv_set(&exclude_files_raw.into());
 
     exclude_dirs_set.insert(".stitchworkspace".to_string());
 
@@ -776,9 +773,8 @@ fn toggle_node_expanded(state: &SharedState, path: &Path) -> bool {
             if n.is_dir {
                 n.expanded = !n.expanded;
                 return true;
-            } else {
-                return false;
             }
+            return false;
         }
         for c in &mut n.children {
             if rec(c, target) {
@@ -940,11 +936,10 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
     }
 
     let displayed: String = if total_chars <= UI_OUTPUT_CHAR_LIMIT {
-        normalized.clone()
+        normalized
     } else {
         let footer = format!(
-            "\n… [truncated: showing {} of {} chars — use “Copy Output” to copy all]\n",
-            UI_OUTPUT_CHAR_LIMIT, total_chars
+            "\n… [truncated: showing {UI_OUTPUT_CHAR_LIMIT} of {total_chars} chars — use “Copy Output” to copy all]\n"
         );
         let keep = UI_OUTPUT_CHAR_LIMIT.saturating_sub(footer.chars().count());
         let mut head: String = normalized.chars().take(keep).collect();
@@ -952,12 +947,12 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
         head
     };
 
-    app.set_output_text(displayed.clone().into());
+    app.set_output_text(displayed.into());
 }
 
 fn update_last_refresh(app: &AppWindow) {
     let now_str = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    app.set_last_refresh(format!("Last refresh: {}", now_str).into());
+    app.set_last_refresh(format!("Last refresh: {now_str}").into());
 }
 
 fn split_csv_set(s: &slint::SharedString) -> std::collections::HashSet<String> {
@@ -1295,7 +1290,7 @@ pub fn on_select_profile(app: &AppWindow, state: &SharedState, index: i32) {
             app.set_hierarchy_only(ws.hierarchy_only);
             app.set_dirs_only(ws.dirs_only);
 
-            state.borrow_mut().workspace_baseline = Some(ws.clone());
+            state.borrow_mut().workspace_baseline = Some(ws);
 
             parse_filters_from_ui(app, state);
 
@@ -1390,13 +1385,13 @@ pub fn on_save_profile_current(app: &AppWindow, state: &SharedState) {
     }
 
     let mut local_settings = load_local_settings(&project_root).unwrap_or_default();
-    local_settings.current_profile = Some(new_name.clone());
+    local_settings.current_profile = Some(new_name);
     let _ = save_local_settings(&project_root, &local_settings);
 
     {
         let mut s = state.borrow_mut();
         s.profiles = list_profiles(&project_root);
-        s.profile_baseline = Some(profile.clone());
+        s.profile_baseline = Some(profile);
     }
     refresh_profiles_ui(app, state);
 
@@ -1614,7 +1609,7 @@ pub fn on_delete_profile(app: &AppWindow, state: &SharedState) {
         app.set_dirs_only(ws.dirs_only);
 
         // Update baseline
-        state.borrow_mut().workspace_baseline = Some(ws.clone());
+        state.borrow_mut().workspace_baseline = Some(ws);
     }
 
     {
@@ -1727,9 +1722,8 @@ fn format_project_path_for_title(dir: &Path) -> String {
         if let Ok(rel) = dir.strip_prefix(&home) {
             if rel.as_os_str().is_empty() {
                 return "~".to_string();
-            } else {
-                return format!("~/{}", path_to_unix(rel));
             }
+            return format!("~/{}", path_to_unix(rel));
         }
     }
     path_to_unix(dir)

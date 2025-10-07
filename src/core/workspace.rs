@@ -41,7 +41,7 @@ pub enum ProfileScope {
     Local,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ProfileSelection {
     /// Project-relative path using forward slashes.
     pub path: String,
@@ -64,14 +64,17 @@ pub struct ProfileMeta {
 
 /* ========================= Paths & basic workspace ========================= */
 
+#[must_use] 
 pub fn workspace_dir(project_root: &Path) -> PathBuf {
     project_root.join(".stitchworkspace")
 }
 
+#[must_use] 
 pub fn workspace_file(project_root: &Path) -> PathBuf {
     workspace_dir(project_root).join("workspace.json")
 }
 
+#[must_use] 
 pub fn local_settings_file(project_root: &Path) -> PathBuf {
     workspace_dir(project_root)
         .join("local")
@@ -183,6 +186,7 @@ fn profile_path(project_root: &Path, scope: ProfileScope, name: &str) -> PathBuf
 
 /* =============================== Workspace IO ============================== */
 
+#[must_use] 
 pub fn load_workspace(project_root: &Path) -> Option<WorkspaceSettings> {
     let path = workspace_file(project_root);
     let data = fs::read(&path).ok()?;
@@ -202,6 +206,7 @@ pub fn save_workspace(project_root: &Path, settings: &WorkspaceSettings) -> io::
     Ok(())
 }
 
+#[must_use] 
 pub fn load_local_settings(project_root: &Path) -> Option<LocalSettings> {
     let path = local_settings_file(project_root);
     let data = fs::read(&path).ok()?;
@@ -236,6 +241,7 @@ pub fn save_profile(project_root: &Path, profile: &Profile, scope: ProfileScope)
 }
 
 /// Returns (Profile, Scope) preferring Local if both exist.
+#[must_use] 
 pub fn load_profile(project_root: &Path, name: &str) -> Option<(Profile, ProfileScope)> {
     let local = profile_path(project_root, ProfileScope::Local, name);
     if let Ok(bytes) = fs::read(&local)
@@ -262,6 +268,7 @@ pub fn delete_profile(project_root: &Path, scope: ProfileScope, name: &str) -> i
 }
 
 /// Lists all profiles found. If a name exists in both scopes, only the Local one is returned.
+#[must_use] 
 pub fn list_profiles(project_root: &Path) -> Vec<ProfileMeta> {
     // Scan a directory for *.json profiles and capture (display_name, scope, timestamp-key)
     // Display name comes from the Profile JSON's `name` field (unsanitized),
@@ -293,9 +300,7 @@ pub fn list_profiles(project_root: &Path) -> Vec<ProfileMeta> {
                 {
                     Some(p) if !p.name.trim().is_empty() => p.name,
                     _ => path
-                        .file_stem()
-                        .map(|os| os.to_string_lossy().to_string())
-                        .unwrap_or_else(|| "unnamed".to_string()),
+                        .file_stem().map_or_else(|| "unnamed".to_string(), |os| os.to_string_lossy().to_string()),
                 };
 
                 out.push((display_name, scope, ts_key));

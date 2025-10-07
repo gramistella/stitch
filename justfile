@@ -5,7 +5,7 @@ set windows-shell := ["bash", "-euo", "pipefail", "-c"]
 
 test:
 	cargo test --workspace --all-targets --all-features
-	
+
 lint:
   cargo clippy --workspace --all-targets --all-features -- \
     -W clippy::all -W clippy::cargo -W clippy::pedantic -W clippy::nursery -A clippy::multiple-crate-versions -D warnings

@@ -3,6 +3,7 @@ use std::collections::{BTreeMap, HashSet};
 
 /* =========================== Parsing & Text utils =========================== */
 
+#[must_use] 
 pub fn parse_hierarchy_text(text: &str) -> Option<HashSet<String>> {
     let mut lines = text.lines();
     let _root = lines.next()?;
@@ -56,6 +57,7 @@ pub fn parse_hierarchy_text(text: &str) -> Option<HashSet<String>> {
     Some(paths)
 }
 
+#[must_use] 
 pub fn split_prefix_list(raw: &str) -> Vec<String> {
     raw.split(',')
         .map(|s| s.trim().to_string())
@@ -63,6 +65,7 @@ pub fn split_prefix_list(raw: &str) -> Vec<String> {
         .collect()
 }
 
+#[must_use] 
 pub fn render_unicode_tree_from_paths(paths: &[String], root_name: Option<&str>) -> String {
     #[derive(Default)]
     struct T {
@@ -111,6 +114,7 @@ pub fn render_unicode_tree_from_paths(paths: &[String], root_name: Option<&str>)
     out
 }
 
+#[must_use] 
 pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> String {
     if prefixes.is_empty() {
         return contents.to_string();
@@ -149,8 +153,7 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
         let first_non_ws = line
             .char_indices()
             .find(|&(_, ch)| !ch.is_whitespace())
-            .map(|(i, _)| i)
-            .unwrap_or(len);
+            .map_or(len, |(i, _)| i);
 
         // Full-line comments: allowed unless we're inside a *true* multi-line construct.
         let in_true_multiline =
@@ -174,7 +177,7 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
         // Iterate characters with their starting byte indices.
         let mut iter = line.char_indices().peekable();
         while let Some((pos, ch)) = iter.next() {
-            let next_pos = iter.peek().map(|(i, _)| *i).unwrap_or(len);
+            let next_pos = iter.peek().map_or(len, |(i, _)| *i);
             let slice = &bytes[pos..];
 
             match state {
@@ -331,13 +334,15 @@ pub fn strip_lines_and_inline_comments(contents: &str, prefixes: &[String]) -> S
     out
 }
 
+#[must_use] 
 pub fn compile_remove_regex_opt(raw: Option<&str>) -> Option<Regex> {
     raw.and_then(|s| {
-        let pattern = format!("(?ms){}", s);
+        let pattern = format!("(?ms){s}");
         Regex::new(&pattern).ok()
     })
 }
 
+#[must_use] 
 pub fn clean_remove_regex(s: &str) -> String {
     let mut t = s.trim().to_string();
     let triple_dq = t.starts_with("\"\"\"") && t.ends_with("\"\"\"");
@@ -353,6 +358,7 @@ pub fn clean_remove_regex(s: &str) -> String {
     t
 }
 
+#[must_use] 
 pub fn parse_extension_filters(
     raw: &str,
 ) -> (
@@ -393,6 +399,7 @@ pub fn parse_extension_filters(
     (include_exts, exclude_exts)
 }
 
+#[must_use] 
 pub fn collapse_consecutive_blank_lines(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut prev_blank = false;

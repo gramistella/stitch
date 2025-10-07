@@ -11,12 +11,12 @@ use stitch::core::{Node, path_to_unix, scan_dir_to_node};
 fn seg() -> impl Strategy<Value = String> {
     // directory / file name part (no slash)
     // small to keep FS work cheap
-    "[A-Za-z0-9_\\-]{1,8}".prop_map(|s| s.to_string())
+    "[A-Za-z0-9_\\-]{1,8}".prop_map(|s| s)
 }
 
 fn extseg() -> impl Strategy<Value = String> {
     // lowercase extension segment
-    "[a-z]{1,3}".prop_map(|s| s.to_string())
+    "[a-z]{1,3}".prop_map(|s| s)
 }
 
 #[derive(Clone, Debug)]
@@ -30,9 +30,9 @@ fn filename_with_last_ext() -> impl Strategy<Value = (String, String)> {
     // 70% single extension:  name.ext   (last_ext=".ext")
     // 30% double extension: name.ext1.ext2 (last_ext=".ext2")
     prop_oneof![
-        (seg(), extseg()).prop_map(|(base, e)| { (format!("{base}.{}", e), format!(".{}", e)) }),
+        (seg(), extseg()).prop_map(|(base, e)| { (format!("{base}.{e}"), format!(".{e}")) }),
         (seg(), extseg(), extseg())
-            .prop_map(|(base, e1, e2)| { (format!("{base}.{}.{}", e1, e2), format!(".{}", e2)) }),
+            .prop_map(|(base, e1, e2)| { (format!("{base}.{e1}.{e2}"), format!(".{e2}")) }),
     ]
 }
 
@@ -146,8 +146,8 @@ fn any_component_in<'a>(
 
 /// Deterministic, data-derived subsets so tests are reproducible without extra RNG:
 /// - include/ext/exclude sets are subsets of *present* extensions (excluding empty "")
-/// - exclude_dirs are subset of present directory names
-/// - exclude_files are subset of present basenames
+/// - `exclude_dirs` are subset of present directory names
+/// - `exclude_files` are subset of present basenames
 ///   The exact selection uses simple predicates on the string to vary results across inputs.
 fn derive_filter_sets(
     files: &[FileSpec],
@@ -205,7 +205,7 @@ fn derive_filter_sets(
     )
 }
 
-/// Predicate defining which files SHOULD be included by scan_dir_to_node with the given filters.
+/// Predicate defining which files SHOULD be included by `scan_dir_to_node` with the given filters.
 fn should_include_file(
     rel_components: &[&str],
     basename: &str,
@@ -279,7 +279,7 @@ proptest! {
         let mut expected_files: BTreeSet<String> = BTreeSet::new();
         for f in &files {
             // rel components for dir exclusion check
-            let mut comps : Vec<&str> = f.dirs.iter().map(|s| s.as_str()).collect();
+            let mut comps : Vec<&str> = f.dirs.iter().map(std::string::String::as_str).collect();
 
             // Basename & last ext
             let basename = f.fname.as_str();
@@ -340,13 +340,13 @@ proptest! {
         let actual_dirs_norm: BTreeSet<String> = if case_insensitive {
             actual_dirs.iter().map(|d| d.to_lowercase()).collect()
         } else {
-            actual_dirs.clone()
+            actual_dirs
         };
 
         if include_mode {
             for d in &actual_dirs_norm {
                 // Does this directory prefix at least one expected file?
-                let prefix = format!("{}/", d);
+                let prefix = format!("{d}/");
                 let has_desc = expected_files_norm.iter().any(|f| f == d || f.starts_with(&prefix));
                 prop_assert!(has_desc,
                     "include-mode: directory '{}' should be hidden if it has no included file descendant",

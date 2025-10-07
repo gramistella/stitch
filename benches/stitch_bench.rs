@@ -2,7 +2,6 @@
 use criterion::{
     BatchSize, BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
 };
-use once_cell::sync::Lazy;
 use std::collections::HashSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -17,7 +16,7 @@ use stitch::core::{
 };
 
 // ---------- Fixture: synthetic repo tree we reuse across benches ----------
-static FS_FIXTURE: Lazy<Fixture> = Lazy::new(|| {
+static FS_FIXTURE: std::sync::LazyLock<Fixture> = std::sync::LazyLock::new(|| {
     let tmp = TempDir::new().expect("tmp");
     let root = tmp.path().to_path_buf();
 
@@ -67,7 +66,7 @@ static FS_FIXTURE: Lazy<Fixture> = Lazy::new(|| {
     // Collect file list
     let all_files: Vec<PathBuf> = WalkDir::new(&root)
         .into_iter()
-        .filter_map(|e| e.ok())
+        .filter_map(std::result::Result::ok)
         .filter(|e| e.file_type().is_file())
         .map(|e| e.path().to_path_buf())
         .collect();
@@ -106,7 +105,7 @@ fn bench_relative_paths(c: &mut Criterion) {
     g.bench_function("strip_prefix", |b| {
         b.iter(|| {
             let mut count = 0usize;
-            for p in fx.all_files.iter() {
+            for p in &fx.all_files {
                 let rel = p.strip_prefix(root).unwrap();
                 let s = rel
                     .iter()
@@ -137,7 +136,7 @@ fn bench_scan_dir_to_node(c: &mut Criterion) {
     c.bench_function("scan_dir_to_node", |b| {
         b.iter_batched(
             || (),
-            |_| {
+            |()| {
                 let node = scan_dir_to_node(
                     fx.root.as_path(),
                     &include,
@@ -148,7 +147,7 @@ fn bench_scan_dir_to_node(c: &mut Criterion) {
                 black_box(node);
             },
             BatchSize::SmallInput,
-        )
+        );
     });
 }
 
@@ -175,7 +174,7 @@ fn bench_render_tree(c: &mut Criterion) {
         b.iter(|| {
             let s = render_unicode_tree_from_paths(black_box(&rels), Some("project"));
             black_box(s);
-        })
+        });
     });
 }
 
@@ -197,7 +196,7 @@ fn bench_strip_and_collapse(c: &mut Criterion) {
         b.iter(|| {
             let out = strip_lines_and_inline_comments(black_box(&src), black_box(&prefixes));
             black_box(out);
-        })
+        });
     });
 
     // collapse on the (unchanged) src to isolate just collapse cost
@@ -206,7 +205,7 @@ fn bench_strip_and_collapse(c: &mut Criterion) {
         b.iter(|| {
             let out = collapse_consecutive_blank_lines(black_box(&src));
             black_box(out);
-        })
+        });
     });
 
     g.finish();
@@ -227,7 +226,7 @@ fn bench_remove_regex(c: &mut Criterion) {
         b.iter(|| {
             let out = re.replace_all(black_box(&src), "");
             black_box(out);
-        })
+        });
     });
 
     g.finish();
@@ -276,7 +275,7 @@ fn bench_hierarchy_parse_render(c: &mut Criterion) {
         b.iter(|| {
             let set = parse_hierarchy_text(black_box(&tree)).unwrap();
             black_box(set);
-        })
+        });
     });
 
     // Also test extension filter parsing (fast path sanity)
@@ -284,7 +283,7 @@ fn bench_hierarchy_parse_render(c: &mut Criterion) {
         b.iter(|| {
             let (_inc, _exc) =
                 parse_extension_filters(black_box(".rs, .md, -.lock, -png, js, -.tmp"));
-        })
+        });
     });
 
     g.finish();

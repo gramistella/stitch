@@ -92,8 +92,8 @@ fn collect_selected_paths_false_overrides_inheritance() {
     let mut explicit: HashMap<PathBuf, bool> = HashMap::new();
     let sub = root.join("sub");
     let a = sub.join("a.txt");
-    explicit.insert(sub.clone(), true); // select the directory
-    explicit.insert(a.clone(), false); // but explicitly de-select a.txt
+    explicit.insert(sub, true); // select the directory
+    explicit.insert(a, false); // but explicitly de-select a.txt
 
     let mut files = Vec::new();
     let mut dirs = Vec::new();
