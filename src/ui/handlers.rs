@@ -304,6 +304,7 @@ pub fn on_toggle_fs_watcher(app: &AppWindow, state: &SharedState) {
             let mut s = state.borrow_mut();
             s.watcher = None;
             s.fs_event_rx = None;
+            s.fs_pump_timer.stop();
         }
     } else {
         // Start the fs watcher
