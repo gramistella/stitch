@@ -27,7 +27,7 @@ dunce = "1"
 notify = "8.2.0"
 serde = { version = "1.0.228", features = ["derive"] }
 syn = { version = "2.0", features = ["full"] }
-quote = "1.0"
+quote = "1.0.41"
 
 [build-dependencies]
 slint-build = "1.13.1"
