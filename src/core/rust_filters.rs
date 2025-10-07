@@ -220,8 +220,13 @@ impl<'a> SignatureReducer<'a> {
                 true
             }
             b'\'' => {
-                self.index = scan_string_literal(self.bytes, self.len, self.index, b'\'');
-                true
+                if is_probable_lifetime(self.bytes, self.len, self.index) {
+                    self.index = skip_lifetime(self.bytes, self.len, self.index);
+                    true
+                } else {
+                    self.index = scan_string_literal(self.bytes, self.len, self.index, b'\'');
+                    true
+                }
             }
             b'r' => {
                 let next = scan_raw_string_literal(self.bytes, self.len, self.index);
@@ -327,6 +332,10 @@ fn locate_body_start(bytes: &[u8], len: usize, fn_start: usize) -> Option<Signat
                 continue;
             }
             b'\'' => {
+                if is_probable_lifetime(bytes, len, idx) {
+                    idx = skip_lifetime(bytes, len, idx);
+                    continue;
+                }
                 idx = scan_string_literal(bytes, len, idx, b'\'');
                 continue;
             }
@@ -381,7 +390,13 @@ fn skip_function_body(bytes: &[u8], len: usize, mut idx: usize) -> usize {
         }
         match bytes[idx] {
             b'"' => idx = scan_string_literal(bytes, len, idx, b'"'),
-            b'\'' => idx = scan_string_literal(bytes, len, idx, b'\''),
+            b'\'' => {
+                if is_probable_lifetime(bytes, len, idx) {
+                    idx = skip_lifetime(bytes, len, idx);
+                } else {
+                    idx = scan_string_literal(bytes, len, idx, b'\'');
+                }
+            }
             b'r' => idx = scan_raw_string_literal(bytes, len, idx),
             b'{' => {
                 depth += 1;
@@ -399,6 +414,46 @@ fn skip_function_body(bytes: &[u8], len: usize, mut idx: usize) -> usize {
 
 const fn is_ident_byte(b: u8) -> bool {
     b == b'_' || (b as char).is_ascii_alphanumeric()
+}
+
+const fn is_ident_start_byte(b: u8) -> bool {
+    b == b'_' || (b as char).is_ascii_alphabetic()
+}
+
+fn is_probable_lifetime(bytes: &[u8], len: usize, idx: usize) -> bool {
+    let next = idx + 1;
+    if next >= len {
+        return false;
+    }
+    let first = bytes[next];
+    if !is_ident_start_byte(first) {
+        return false;
+    }
+    let mut cursor = next + 1;
+    while cursor < len {
+        let current = bytes[cursor];
+        if current == b'\'' {
+            return false;
+        }
+        if is_ident_byte(current) {
+            cursor += 1;
+            continue;
+        }
+        break;
+    }
+    true
+}
+
+fn skip_lifetime(bytes: &[u8], len: usize, idx: usize) -> usize {
+    let mut cursor = idx + 1;
+    while cursor < len {
+        let current = bytes[cursor];
+        if !is_ident_byte(current) {
+            break;
+        }
+        cursor += 1;
+    }
+    cursor
 }
 
 /// Match a relative path against a simple, comma-separated filter with '*' wildcards.

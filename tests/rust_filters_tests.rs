@@ -75,6 +75,40 @@ trait T {
 }
 
 #[test]
+fn function_signatures_only_handles_impl_lifetimes() {
+    let src = r#"
+impl<'a> PrefixBuckets<'a> {
+    fn new(prefixes: &'a [String]) -> Self {
+        let mut buckets: [Vec<&'a [u8]>; 256] = std::array::from_fn(|_| Vec::new());
+        for prefix in prefixes.iter().filter(|p| !p.is_empty()) {
+            let bytes = prefix.as_bytes();
+            let first = bytes[0] as usize;
+            buckets[first].push(bytes);
+        }
+        Self { buckets }
+    }
+
+    fn matches(&self, bytes: &'a [u8], start: usize) -> bool {
+        let slice: &'a [u8] = &bytes[start..];
+        slice.first().is_some()
+    }
+}
+"#;
+    let opts = RustFilterOptions {
+        remove_inline_regular_comments: false,
+        remove_doc_comments: false,
+        function_signatures_only: true,
+    };
+    let got = apply_rust_filters(src, &opts);
+    assert!(got.contains("fn new(prefixes: &'a [String]) -> Self;"));
+    assert!(got.contains(
+        "fn matches(&self, bytes: &'a [u8], start: usize) -> bool;"
+    ));
+    assert!(!got.contains("Self { buckets }"));
+    assert!(!got.contains("slice.first().is_some()"));
+}
+
+#[test]
 fn nested_block_comments_removed_when_regular_comments_enabled() {
     let src = "let a = 1; /* level1 /* level2 */ */ let b = 2;";
     let opts = RustFilterOptions {
