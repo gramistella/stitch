@@ -1667,6 +1667,7 @@ fn workspace_settings_equal(a: &WorkspaceSettings, b: &WorkspaceSettings) -> boo
         && a.rust_remove_inline_comments == b.rust_remove_inline_comments
         && a.rust_remove_doc_comments == b.rust_remove_doc_comments
         && a.rust_function_signatures_only == b.rust_function_signatures_only
+        && a.rust_signatures_only_filter == b.rust_signatures_only_filter 
     // Note: we intentionally ignore `current_profile` here for dirtiness comparison
 }
 
