@@ -48,6 +48,7 @@ pub struct AppState {
     pub gen_result_rx: Option<mpsc::Receiver<(u64, String)>>,
     pub gen_pump_timer: slint::Timer,
     pub disable_fs_watcher: bool,
+    pub disable_notes_section: bool,
 
     // Rust-specific filters and detection
     pub has_rust_files: bool,

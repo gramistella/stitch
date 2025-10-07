@@ -123,6 +123,7 @@ component TopBar inherits HorizontalBox {
     in-out property <bool> hierarchy-only;
     in-out property <bool> dirs-only;
     in-out property <bool> disable-fs-watcher;
+    in-out property <bool> disable-notes-section;
     in property <string> last-refresh;
     in property <bool> show-copy-toast;
     in property <string> copy-toast-text;
@@ -178,6 +179,7 @@ component TopBar inherits HorizontalBox {
         
         HorizontalBox {
             CheckBox { text: "Disable FS Watcher"; checked <=> root.disable-fs-watcher; height: 26px; width: 180px; horizontal-stretch: 1; toggled => { root.toggle-fs-watcher(); }}
+            CheckBox { text: "Disable Notes Section"; checked <=> root.disable-notes-section; height: 26px; width: 200px; horizontal-stretch: 1; toggled => { root.generate-output(); }}
         }
     }
 
@@ -536,6 +538,7 @@ export component AppWindow inherits Window {
     in-out property <bool> hierarchy-only;
     in-out property <bool> dirs-only;
     in-out property <bool> disable-fs-watcher;
+    in-out property <bool> disable-notes-section;
     in-out property <string> last-refresh;
     in-out property <string> output-text;
     in-out property <[string]> output-lines;
@@ -577,6 +580,7 @@ export component AppWindow inherits Window {
             hierarchy-only <=> root.hierarchy-only;
             dirs-only <=> root.dirs-only;
             disable-fs-watcher <=> root.disable-fs-watcher;
+            disable-notes-section <=> root.disable-notes-section;
             last-refresh: root.last-refresh;
             show-copy-toast: root.show-copy-toast;
             copy-toast-text: root.copy-toast-text;

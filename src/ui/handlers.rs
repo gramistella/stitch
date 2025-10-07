@@ -236,6 +236,7 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
 
     let want_dirs_only = app.get_dirs_only();
     let hierarchy_only = app.get_hierarchy_only();
+    let disable_notes = app.get_disable_notes_section();
 
     // Basic guards
     let no_folder_selected = {
@@ -310,6 +311,16 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
         &relative_paths,
         Some(&root_name),
     ));
+
+    // Optional Notes section
+    if !disable_notes {
+        let notes = build_notes_section(state, &selected_dir, &relative_paths);
+        if !notes.trim().is_empty() {
+            header.push_str("\n=== NOTES ===\n\n");
+            header.push_str(&notes);
+            header.push_str("\n");
+        }
+    }
 
     // If only hierarchy/dirs, finish synchronously.
     if hierarchy_only || want_dirs_only {
@@ -444,6 +455,97 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
         // Send final result back to the UI thread pump
         let _ = tx.send((my_seq, out));
     });
+}
+
+fn build_notes_section(state: &SharedState, _project_root: &std::path::Path, rel_selected_paths: &[String]) -> String {
+    use std::collections::BTreeSet;
+    let s = state.borrow();
+    let mut lines: Vec<String> = Vec::new();
+
+    // Helpers: presence filtering
+    let selected_set: BTreeSet<String> = rel_selected_paths.iter().cloned().collect();
+    let exists_rel_file = |rel: &str| selected_set.contains(rel);
+    let exists_rel_dir = |rel: &str| selected_set.iter().any(|p| p == rel || p.starts_with(&(rel.to_string() + "/")));
+
+    // Excluded directories that actually exist
+    if !s.exclude_dirs.is_empty() {
+        let mut present: Vec<String> = s
+            .exclude_dirs
+            .iter()
+            .filter_map(|d| {
+                let drel = d.as_str();
+                if exists_rel_dir(drel) { Some(drel.to_string()) } else { None }
+            })
+            .collect();
+        present.sort();
+        if !present.is_empty() {
+            lines.push(format!("Excluded directories: {}", present.join(", ")));
+        }
+    }
+
+    // Excluded files that actually exist
+    if !s.exclude_files.is_empty() {
+        let mut present: Vec<String> = s
+            .exclude_files
+            .iter()
+            .filter_map(|f| if exists_rel_file(f) { Some(f.clone()) } else { None })
+            .collect();
+        present.sort();
+        if !present.is_empty() {
+            lines.push(format!("Excluded files: {}", present.join(", ")));
+        }
+    }
+
+    // Extension filters (only note those that actually apply to selected files)
+    if !s.include_exts.is_empty() {
+        let mut present: BTreeSet<String> = BTreeSet::new();
+        for rel in rel_selected_paths {
+            if let Some(ext) = std::path::Path::new(rel).extension().and_then(|e| e.to_str()) {
+                let dot = format!(".{}", ext.to_lowercase());
+                if s.include_exts.contains(&dot) { present.insert(dot); }
+            }
+        }
+        if !present.is_empty() {
+            lines.push(format!("Included extensions: {}", present.into_iter().collect::<Vec<_>>().join(", ")));
+        }
+    }
+    if !s.exclude_exts.is_empty() {
+        let mut present: BTreeSet<String> = BTreeSet::new();
+        for rel in rel_selected_paths {
+            if let Some(ext) = std::path::Path::new(rel).extension().and_then(|e| e.to_str()) {
+                let dot = format!(".{}", ext.to_lowercase());
+                if s.exclude_exts.contains(&dot) { present.insert(dot); }
+            }
+        }
+        if !present.is_empty() {
+            lines.push(format!("Excluded extensions: {}", present.into_iter().collect::<Vec<_>>().join(", ")));
+        }
+    }
+
+    // Remove prefixes (only if enabled and selected files contain any line starting with them). We keep a light note.
+    if !s.remove_prefixes.is_empty() {
+        lines.push(format!("Removed lines starting with: {}", s.remove_prefixes.join(", ")));
+    }
+    if s.remove_regex.is_some() {
+        lines.push("Applied remove-regex".to_string());
+    }
+
+    // Rust-specific notes, with scoping
+    if s.rust_remove_inline_comments {
+        lines.push("Removed Rust inline comments (//, /* */)".to_string());
+    }
+    if s.rust_remove_doc_comments {
+        lines.push("Removed Rust doc comments (///, //!, /** */)".to_string());
+    }
+    if s.rust_function_signatures_only {
+        if s.rust_signatures_only_filter.trim().is_empty() {
+            lines.push("Functions bodies omitted (signatures only) for all Rust files".to_string());
+        } else {
+            lines.push(format!("Functions bodies omitted (signatures only) for: {}", s.rust_signatures_only_filter));
+        }
+    }
+
+    lines.join("\n")
 }
 
 pub fn on_copy_output(app: &AppWindow, state: &SharedState) {

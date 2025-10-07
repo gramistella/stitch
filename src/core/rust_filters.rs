@@ -84,109 +84,72 @@ pub fn apply_rust_filters(source: &str, opts: &RustFilterOptions) -> String {
 }
 
 fn transform_functions_to_signatures(src: &str) -> String {
-    // Replace each function body with ";\n" while preserving all other text verbatim.
+    // Slice-based replacer: avoids per-byte casting, preserves UTF-8.
     #[derive(Copy, Clone, Eq, PartialEq)]
     enum S { Code, Line, Block{depth: usize}, Dq{esc: bool}, Sq{esc: bool}, Raw{hashes: usize} }
 
-    let bytes = src.as_bytes();
-    let n = bytes.len();
-    let mut i = 0usize;              // scan index
-    let mut last_copied = 0usize;    // start index of next slice to copy
-    let mut st = S::Code;            // top-level scan state
+    let b = src.as_bytes();
+    let n = b.len();
+    let mut i = 0usize;
     let mut out = String::with_capacity(n);
+    let mut last = 0usize;
+    let mut st = S::Code;
+    let is_ident = |x: u8| x == b'_' || (x as char).is_ascii_alphanumeric();
 
-    let is_ident = |b: u8| b == b'_' || (b as char).is_ascii_alphanumeric();
-
-    fn scan_string(bytes: &[u8], n: usize, mut j: usize, quote: u8) -> usize {
-        let mut esc = false; j += 1;
-        while j < n { let b = bytes[j]; j += 1; if !esc && b == quote { break; } esc = b == b'\\' && !esc; }
-        j
-    }
-    fn scan_raw_string(bytes: &[u8], n: usize, mut j: usize) -> usize {
-        let mut k = j + 1; let mut h = 0usize; while k < n && bytes[k] == b'#' { h += 1; k += 1; }
-        if k < n && bytes[k] == b'"' { j = k + 1; } else { return j + 1; }
-        while j < n { if bytes[j] == b'"' { let mut t = j + 1; let mut m = 0usize; while m < h && t < n && bytes[t] == b'#' { t += 1; m += 1; } if m == h { return t; } } j += 1; }
-        j
-    }
+    fn scan_str(b: &[u8], n: usize, mut j: usize, q: u8) -> usize { let mut esc=false; j+=1; while j<n{let c=b[j]; j+=1; if !esc && c==q{break;} esc=c==b'\\' && !esc;} j }
+    fn scan_raw(b: &[u8], n: usize, mut j: usize) -> usize { let mut k=j+1; let mut h=0; while k<n && b[k]==b'#'{h+=1;k+=1;} if k<n && b[k]==b'"'{j=k+1;} else {return j+1;} while j<n{ if b[j]==b'"'{let mut t=j+1; let mut m=0; while m<h && t<n && b[t]==b'#'{t+=1;m+=1;} if m==h{return t;}} j+=1;} j }
 
     while i < n {
         match st {
             S::Code => {
-                // quickly skip comments/strings/raw
-                if i + 1 < n && bytes[i] == b'/' && bytes[i+1] == b'/' { st = S::Line; i += 2; continue; }
-                if i + 1 < n && bytes[i] == b'/' && bytes[i+1] == b'*' { st = S::Block{depth:1}; i += 2; continue; }
-                if bytes[i] == b'"' { i = scan_string(bytes, n, i, b'"'); continue; }
-                if bytes[i] == b'\'' { i = scan_string(bytes, n, i, b'\''); continue; }
-                if bytes[i] == b'r' { i = scan_raw_string(bytes, n, i); continue; }
+                if i+1<n && b[i]==b'/' && b[i+1]==b'/' { st=S::Line; i+=2; continue; }
+                if i+1<n && b[i]==b'/' && b[i+1]==b'*' { st=S::Block{depth:1}; i+=2; continue; }
+                if b[i]==b'"' { i=scan_str(b,n,i,b'"'); continue; }
+                if b[i]==b'\'' { i=scan_str(b,n,i,b'\''); continue; }
+                if b[i]==b'r' { i=scan_raw(b,n,i); continue; }
 
-                // try match 'fn' token at boundary
-                if bytes[i] == b'f' && i + 1 < n && bytes[i+1] == b'n' {
-                    let prev_ok = i == 0 || !is_ident(bytes[i.saturating_sub(1)]);
-                    let next_ok = i + 2 >= n || !is_ident(bytes[i+2]);
+                if b[i]==b'f' && i+1<n && b[i+1]==b'n' {
+                    let prev_ok = i==0 || !is_ident(b[i-1]);
+                    let next_ok = i+2>=n || !is_ident(b[i+2]);
                     if prev_ok && next_ok {
-                        // find opening '{' of body, respecting parentheses and inner strings/comments
-                        let mut j = i + 2; let mut par = 0i32; let mut st2 = S::Code;
-                        while j < n {
-                            match st2 {
-                                S::Code => {
-                                    if bytes[j] == b'(' { par += 1; j += 1; continue; }
-                                    if bytes[j] == b')' { par -= 1; j += 1; continue; }
-                                    if bytes[j] == b'{' && par <= 0 { break; }
-                                    if j + 1 < n && bytes[j] == b'/' && bytes[j+1] == b'/' { st2 = S::Line; j += 2; continue; }
-                                    if j + 1 < n && bytes[j] == b'/' && bytes[j+1] == b'*' { st2 = S::Block{depth:1}; j += 2; continue; }
-                                    if bytes[j] == b'"' { st2 = S::Dq{esc:false}; j += 1; continue; }
-                                    if bytes[j] == b'\'' { st2 = S::Sq{esc:false}; j += 1; continue; }
-                                    if bytes[j] == b'r' { j = scan_raw_string(bytes, n, j); continue; }
-                                    j += 1;
-                                }
-                                S::Line => { while j < n && bytes[j] != b'\n' { j += 1; } if j < n { j += 1; } st2 = S::Code; }
-                                S::Block{mut depth} => { while j + 1 < n && depth > 0 { if bytes[j] == b'/' && bytes[j+1] == b'*' { depth += 1; j += 2; continue; } if bytes[j] == b'*' && bytes[j+1] == b'/' { depth -= 1; j += 2; continue; } j += 1; } if depth == 0 { st2 = S::Code; } }
-                                S::Dq{..} => { j = scan_string(bytes, n, j.saturating_sub(1), b'"'); st2 = S::Code; }
-                                S::Sq{..} => { j = scan_string(bytes, n, j.saturating_sub(1), b'\''); st2 = S::Code; }
-                                S::Raw{..} => { j = scan_raw_string(bytes, n, j.saturating_sub(1)); st2 = S::Code; }
-                            }
-                        }
-                        if j >= n || bytes[j] != b'{' { i += 2; continue; }
-
-                        // emit text before body and collapse body to ";\n"
-                        let mut sig_end = j; while sig_end > i && bytes[sig_end - 1].is_ascii_whitespace() { sig_end -= 1; }
-                        out.push_str(&src[last_copied..sig_end]); out.push_str(";\n");
-
-                        // skip body
-                        let mut k = j + 1; let mut depth = 1usize; let mut st3 = S::Code;
-                        while k < n && depth > 0 {
-                            match st3 {
-                                S::Code => {
-                                    if k + 1 < n && bytes[k] == b'/' && bytes[k+1] == b'/' { st3 = S::Line; k += 2; continue; }
-                                    if k + 1 < n && bytes[k] == b'/' && bytes[k+1] == b'*' { st3 = S::Block{depth:1}; k += 2; continue; }
-                                    if bytes[k] == b'"' { st3 = S::Dq{esc:false}; k += 1; continue; }
-                                    if bytes[k] == b'\'' { st3 = S::Sq{esc:false}; k += 1; continue; }
-                                    if bytes[k] == b'r' { k = scan_raw_string(bytes, n, k); continue; }
-                                    if bytes[k] == b'{' { depth += 1; k += 1; continue; }
-                                    if bytes[k] == b'}' { depth -= 1; k += 1; continue; }
-                                    k += 1;
-                                }
-                                S::Line => { while k < n && bytes[k] != b'\n' { k += 1; } if k < n { k += 1; } st3 = S::Code; }
-                                S::Block{mut depth} => { while k + 1 < n && depth > 0 { if bytes[k] == b'/' && bytes[k+1] == b'*' { depth += 1; k += 2; continue; } if bytes[k] == b'*' && bytes[k+1] == b'/' { depth -= 1; k += 2; continue; } k += 1; } if depth == 0 { st3 = S::Code; } }
-                                S::Dq{..} => { k = scan_string(bytes, n, k.saturating_sub(1), b'"'); st3 = S::Code; }
-                                S::Sq{..} => { k = scan_string(bytes, n, k.saturating_sub(1), b'\''); st3 = S::Code; }
-                                S::Raw{..} => { k = scan_raw_string(bytes, n, k.saturating_sub(1)); st3 = S::Code; }
-                            }
-                        }
-                        last_copied = k; i = k; st = S::Code; continue;
+                        // Find body opener
+                        let mut j=i+2; let mut par=0i32; let mut st2=S::Code;
+                        while j<n { match st2 {
+                            S::Code=>{ if b[j]==b'(' {par+=1;j+=1;continue;} if b[j]==b')' {par-=1;j+=1;continue;} if b[j]==b'{' && par<=0 {break;} if j+1<n && b[j]==b'/' && b[j+1]==b'/' {st2=S::Line;j+=2;continue;} if j+1<n && b[j]==b'/' && b[j+1]==b'*' {st2=S::Block{depth:1};j+=2;continue;} if b[j]==b'"' {st2=S::Dq{esc:false};j+=1;continue;} if b[j]==b'\'' {st2=S::Sq{esc:false};j+=1;continue;} if b[j]==b'r' { j=scan_raw(b,n,j); continue;} j+=1; }
+                            S::Line=>{ while j<n && b[j]!=b'\n' {j+=1;} if j<n {j+=1;} st2=S::Code; }
+                            S::Block{mut depth}=>{ while j+1<n && depth>0 { if b[j]==b'/' && b[j+1]==b'*' {depth+=1;j+=2;continue;} if b[j]==b'*' && b[j+1]==b'/' {depth-=1;j+=2;continue;} j+=1;} if depth==0 {st2=S::Code;} }
+                            S::Dq{..}=>{ j=scan_str(b,n,j.saturating_sub(1),b'"'); st2=S::Code; }
+                            S::Sq{..}=>{ j=scan_str(b,n,j.saturating_sub(1),b'\''); st2=S::Code; }
+                            S::Raw{..}=>{ j=scan_raw(b,n,j.saturating_sub(1)); st2=S::Code; }
+                        }}
+                        if j>=n || b[j]!=b'{' { i+=2; continue; }
+                        // Emit up to '{' (trim trailing ws)
+                        let mut sig_end=j; while sig_end>i && b[sig_end-1].is_ascii_whitespace() { sig_end-=1; }
+                        out.push_str(&src[last..sig_end]);
+                        out.push_str(";\n");
+                        // Skip body
+                        let mut k=j+1; let mut depth=1usize; let mut st3=S::Code;
+                        while k<n && depth>0 { match st3 {
+                            S::Code=>{ if k+1<n && b[k]==b'/' && b[k+1]==b'/' {st3=S::Line;k+=2;continue;} if k+1<n && b[k]==b'/' && b[k+1]==b'*' {st3=S::Block{depth:1};k+=2;continue;} if b[k]==b'"' {st3=S::Dq{esc:false};k+=1;continue;} if b[k]==b'\'' {st3=S::Sq{esc:false};k+=1;continue;} if b[k]==b'r' { k=scan_raw(b,n,k); continue;} if b[k]==b'{' {depth+=1;k+=1;continue;} if b[k]==b'}' {depth-=1;k+=1;continue;} k+=1; }
+                            S::Line=>{ while k<n && b[k]!=b'\n' {k+=1;} if k<n {k+=1;} st3=S::Code; }
+                            S::Block{mut depth}=>{ while k+1<n && depth>0 { if b[k]==b'/' && b[k+1]==b'*' {depth+=1;k+=2;continue;} if b[k]==b'*' && b[k+1]==b'/' {depth-=1;k+=2;continue;} k+=1;} if depth==0 {st3=S::Code;} }
+                            S::Dq{..}=>{ k=scan_str(b,n,k.saturating_sub(1),b'"'); st3=S::Code; }
+                            S::Sq{..}=>{ k=scan_str(b,n,k.saturating_sub(1),b'\''); st3=S::Code; }
+                            S::Raw{..}=>{ k=scan_raw(b,n,k.saturating_sub(1)); st3=S::Code; }
+                        }}
+                        last=k; i=k; continue;
                     }
                 }
-                i += 1;
+                i+=1;
             }
-            S::Line => { while i < n && bytes[i] != b'\n' { i += 1; } if i < n { i += 1; } st = S::Code; }
-            S::Block{mut depth} => { while i + 1 < n && depth > 0 { if bytes[i] == b'/' && bytes[i+1] == b'*' { depth += 1; i += 2; continue; } if bytes[i] == b'*' && bytes[i+1] == b'/' { depth -= 1; i += 2; continue; } i += 1; } if depth == 0 { st = S::Code; } }
-            S::Dq{..} => { i = scan_string(bytes, n, i, b'"'); st = S::Code; }
-            S::Sq{..} => { i = scan_string(bytes, n, i, b'\''); st = S::Code; }
-            S::Raw{..} => { i = scan_raw_string(bytes, n, i); st = S::Code; }
+            S::Line=>{ while i<n && b[i]!=b'\n' { i+=1; } if i<n { i+=1; } st=S::Code; }
+            S::Block{mut depth}=>{ while i+1<n && depth>0 { if b[i]==b'/' && b[i+1]==b'*' {depth+=1;i+=2;continue;} if b[i]==b'*' && b[i+1]==b'/' {depth-=1;i+=2;continue;} i+=1;} if depth==0 {st=S::Code;} }
+            S::Dq{..}=>{ i=scan_str(b,n,i,b'"'); st=S::Code; }
+            S::Sq{..}=>{ i=scan_str(b,n,i,b'\''); st=S::Code; }
+            S::Raw{..}=>{ i=scan_raw(b,n,i); st=S::Code; }
         }
     }
-
-    out.push_str(&src[last_copied..]);
+    out.push_str(&src[last..]);
     out
 }
 
