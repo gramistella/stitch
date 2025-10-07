@@ -25,20 +25,58 @@ pub fn apply_rust_filters(source: &str, opts: &RustFilterOptions) -> String {
     match syn::parse_file(source) {
         Ok(_ast) => {
             if opts.function_signatures_only {
-                return transform_functions_to_signatures(source);
+                // Apply comment removal first (if requested), then collapse function bodies only.
+                let maybe_cleaned = if opts.remove_inline_regular_comments || opts.remove_doc_comments {
+                    Some(remove_comments_textual(
+                        source,
+                        opts.remove_inline_regular_comments,
+                        opts.remove_doc_comments,
+                    ))
+                } else {
+                    None
+                };
+                let base: std::borrow::Cow<str> = match maybe_cleaned {
+                    Some(s) => std::borrow::Cow::Owned(s),
+                    None => std::borrow::Cow::Borrowed(source),
+                };
+                let transformed = transform_functions_to_signatures(&base);
+                let collapsed = crate::core::collapse_consecutive_blank_lines(&transformed);
+                return trim_leading_blank_lines(&collapsed);
             }
-            // For comment removal, we do a conservative textual transformation:
-            let cleaned = remove_comments_textual(source, opts.remove_inline_regular_comments, opts.remove_doc_comments);
+            // For comment removal only
+            let cleaned = remove_comments_textual(
+                source,
+                opts.remove_inline_regular_comments,
+                opts.remove_doc_comments,
+            );
             let collapsed = crate::core::collapse_consecutive_blank_lines(&cleaned);
             trim_leading_blank_lines(&collapsed)
         }
         Err(_e) => {
             // Fallback: textual pass
             if opts.function_signatures_only {
-                // Fallback to textual transform; preserve formatting as much as possible
-                return transform_functions_to_signatures(source);
+                let maybe_cleaned = if opts.remove_inline_regular_comments || opts.remove_doc_comments {
+                    Some(remove_comments_textual(
+                        source,
+                        opts.remove_inline_regular_comments,
+                        opts.remove_doc_comments,
+                    ))
+                } else {
+                    None
+                };
+                let base: std::borrow::Cow<str> = match maybe_cleaned {
+                    Some(s) => std::borrow::Cow::Owned(s),
+                    None => std::borrow::Cow::Borrowed(source),
+                };
+                let transformed = transform_functions_to_signatures(&base);
+                let collapsed = crate::core::collapse_consecutive_blank_lines(&transformed);
+                return trim_leading_blank_lines(&collapsed);
             }
-            let cleaned = remove_comments_textual(source, opts.remove_inline_regular_comments, opts.remove_doc_comments);
+            let cleaned = remove_comments_textual(
+                source,
+                opts.remove_inline_regular_comments,
+                opts.remove_doc_comments,
+            );
             let collapsed = crate::core::collapse_consecutive_blank_lines(&cleaned);
             trim_leading_blank_lines(&collapsed)
         }
