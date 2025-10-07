@@ -73,6 +73,8 @@ pub struct AppState {
     pub exclude_exts: HashSet<String>,
     pub exclude_dirs: HashSet<String>,
     pub exclude_files: HashSet<String>,
+    pub existing_excluded_dirs: HashSet<String>,
+    pub existing_excluded_files: HashSet<String>,
     pub copy_toast_timer: slint::Timer,
     pub select_dialog: Option<crate::ui::SelectFromTextDialog>,
     pub fs: FsState,

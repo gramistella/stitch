@@ -101,9 +101,7 @@ impl<'a> PrefixBuckets<'a> {
     };
     let got = apply_rust_filters(src, &opts);
     assert!(got.contains("fn new(prefixes: &'a [String]) -> Self;"));
-    assert!(got.contains(
-        "fn matches(&self, bytes: &'a [u8], start: usize) -> bool;"
-    ));
+    assert!(got.contains("fn matches(&self, bytes: &'a [u8], start: usize) -> bool;"));
     assert!(!got.contains("Self { buckets }"));
     assert!(!got.contains("slice.first().is_some()"));
 }

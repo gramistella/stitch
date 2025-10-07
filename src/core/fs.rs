@@ -103,6 +103,18 @@ fn dot_lower_last_ext(p: &Path) -> String {
     })
 }
 
+#[derive(Default, Debug)]
+pub struct ScanStats {
+    pub excluded_dirs_found: HashSet<String>,
+    pub excluded_files_found: HashSet<String>,
+}
+
+#[derive(Debug)]
+pub struct ScanResult {
+    pub node: Node,
+    pub stats: ScanStats,
+}
+
 #[must_use]
 pub fn scan_dir_to_node<S: ::std::hash::BuildHasher>(
     dir: &Path,
@@ -111,6 +123,26 @@ pub fn scan_dir_to_node<S: ::std::hash::BuildHasher>(
     exclude_dirs: &HashSet<String, S>,
     exclude_files: &HashSet<String, S>,
 ) -> Node {
+    scan_dir_to_node_internal(dir, include_exts, exclude_exts, exclude_dirs, exclude_files).node
+}
+
+pub fn scan_dir_to_node_with_stats<S: ::std::hash::BuildHasher>(
+    dir: &Path,
+    include_exts: &HashSet<String, S>,
+    exclude_exts: &HashSet<String, S>,
+    exclude_dirs: &HashSet<String, S>,
+    exclude_files: &HashSet<String, S>,
+) -> ScanResult {
+    scan_dir_to_node_internal(dir, include_exts, exclude_exts, exclude_dirs, exclude_files)
+}
+
+fn scan_dir_to_node_internal<S: ::std::hash::BuildHasher>(
+    dir: &Path,
+    include_exts: &HashSet<String, S>,
+    exclude_exts: &HashSet<String, S>,
+    exclude_dirs: &HashSet<String, S>,
+    exclude_files: &HashSet<String, S>,
+) -> ScanResult {
     let name = dir
         .file_name()
         .unwrap_or_default()
@@ -126,7 +158,7 @@ pub fn scan_dir_to_node<S: ::std::hash::BuildHasher>(
         has_children: false,
     };
 
-    let (mut files, mut dirs) =
+    let (mut files, mut dirs, mut stats) =
         gather_dir_entries(dir, include_exts, exclude_exts, exclude_dirs, exclude_files);
 
     files.sort_by(|a, b| a.0.cmp(&b.0));
@@ -148,13 +180,23 @@ pub fn scan_dir_to_node<S: ::std::hash::BuildHasher>(
 
     let include_mode = !include_exts.is_empty();
     for (_basename, path) in dirs {
-        let child = scan_dir_to_node(
+        let ScanResult {
+            node: child,
+            stats: mut child_stats,
+        } = scan_dir_to_node_internal(
             &path,
             include_exts,
             exclude_exts,
             exclude_dirs,
             exclude_files,
         );
+
+        stats
+            .excluded_dirs_found
+            .extend(child_stats.excluded_dirs_found.drain());
+        stats
+            .excluded_files_found
+            .extend(child_stats.excluded_files_found.drain());
 
         let child_visible = if include_mode {
             !child.children.is_empty() || child.has_children
@@ -169,7 +211,7 @@ pub fn scan_dir_to_node<S: ::std::hash::BuildHasher>(
         }
     }
 
-    node
+    ScanResult { node, stats }
 }
 
 fn gather_dir_entries<S: ::std::hash::BuildHasher>(
@@ -178,13 +220,14 @@ fn gather_dir_entries<S: ::std::hash::BuildHasher>(
     exclude_exts: &HashSet<String, S>,
     exclude_dirs: &HashSet<String, S>,
     exclude_files: &HashSet<String, S>,
-) -> (Vec<NamePath>, Vec<NamePath>) {
+) -> (Vec<NamePath>, Vec<NamePath>, ScanStats) {
     let Ok(entries) = fs::read_dir(dir) else {
-        return (Vec::new(), Vec::new());
+        return (Vec::new(), Vec::new(), ScanStats::default());
     };
 
     let mut dirs: Vec<NamePath> = Vec::new();
     let mut files: Vec<NamePath> = Vec::new();
+    let mut stats = ScanStats::default();
 
     let include_mode = !include_exts.is_empty();
     let exclude_mode = !exclude_exts.is_empty();
@@ -196,6 +239,7 @@ fn gather_dir_entries<S: ::std::hash::BuildHasher>(
         let is_dir = ent.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
         if is_dir {
             if exclude_dirs.contains(&base) {
+                stats.excluded_dirs_found.insert(base);
                 continue;
             }
             dirs.push((base, path));
@@ -203,6 +247,7 @@ fn gather_dir_entries<S: ::std::hash::BuildHasher>(
         }
 
         if exclude_files.contains(&base) {
+            stats.excluded_files_found.insert(base);
             continue;
         }
 
@@ -222,7 +267,7 @@ fn gather_dir_entries<S: ::std::hash::BuildHasher>(
         }
     }
 
-    (files, dirs)
+    (files, dirs, stats)
 }
 
 #[must_use]

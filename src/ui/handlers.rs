@@ -19,7 +19,8 @@ use stitch::core::{
     ensure_workspace_dir, gather_paths_set, is_ancestor_of, is_rust_file_path, list_profiles,
     load_local_settings, load_profile, load_workspace, parse_extension_filters,
     parse_hierarchy_text, path_to_unix, render_unicode_tree_from_paths, save_local_settings,
-    save_profile, save_workspace, scan_dir_to_node, signatures_filter_matches, split_prefix_list,
+    save_profile, save_workspace, scan_dir_to_node_with_stats, signatures_filter_matches,
+    split_prefix_list,
 };
 
 fn walk_and_mark(
@@ -117,45 +118,6 @@ impl SelectedPresence {
     }
 }
 
-fn gather_existing_exclusions(
-    root: &Node,
-    dir_names: &[String],
-    file_names: &[String],
-) -> (HashSet<String>, HashSet<String>) {
-    let mut remaining_dirs: HashSet<&str> = dir_names.iter().map(String::as_str).collect();
-    let mut remaining_files: HashSet<&str> = file_names.iter().map(String::as_str).collect();
-
-    if remaining_dirs.is_empty() && remaining_files.is_empty() {
-        return (HashSet::new(), HashSet::new());
-    }
-
-    let mut found_dirs: HashSet<String> = HashSet::new();
-    let mut found_files: HashSet<String> = HashSet::new();
-    let mut stack: Vec<&Node> = vec![root];
-
-    while let Some(node) = stack.pop() {
-        if node.is_dir {
-            if remaining_dirs.remove(node.name.as_str()) {
-                found_dirs.insert(node.name.clone());
-            }
-            for child in &node.children {
-                if remaining_dirs.is_empty() && remaining_files.is_empty() {
-                    break;
-                }
-                stack.push(child);
-            }
-        } else if remaining_files.remove(node.name.as_str()) {
-            found_files.insert(node.name.clone());
-        }
-
-        if remaining_dirs.is_empty() && remaining_files.is_empty() {
-            break;
-        }
-    }
-
-    (found_dirs, found_files)
-}
-
 /* =============================== UI Actions =============================== */
 
 pub fn apply_selection_from_text(app: &AppWindow, state: &SharedState, text: &str) {
@@ -197,6 +159,8 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
             s.explicit_states.clear();
             s.last_mod_times.clear();
             s.fs.dirty = true;
+            s.existing_excluded_dirs.clear();
+            s.existing_excluded_files.clear();
         }
 
         app.set_project_path(format_project_path_for_title(&dir).into());
@@ -763,11 +727,16 @@ fn build_notes_section(
         exclude_dirs.sort_unstable();
         exclude_files.sort_unstable();
 
-        let (existing_excluded_dirs, existing_excluded_files) = s
-            .root_node
-            .as_ref()
-            .map(|root| gather_existing_exclusions(root, &exclude_dirs, &exclude_files))
-            .unwrap_or_else(|| (HashSet::new(), HashSet::new()));
+        let existing_excluded_dirs: HashSet<String> = exclude_dirs
+            .iter()
+            .filter(|dir| s.existing_excluded_dirs.contains(*dir))
+            .cloned()
+            .collect();
+        let existing_excluded_files: HashSet<String> = exclude_files
+            .iter()
+            .filter(|file| s.existing_excluded_files.contains(*file))
+            .cloned()
+            .collect();
 
         NotesContext {
             exclude_dirs,
@@ -852,22 +821,24 @@ pub fn rebuild_tree_and_ui(app: &AppWindow, state: &SharedState) {
         }
     }
     {
-        let (root, snapshot) = {
+        let (root, snapshot, stats) = {
             let s = state.borrow();
             let dir = s.selected_directory.as_ref().unwrap().clone();
             let include = s.include_exts.clone();
             let exclude = s.exclude_exts.clone();
             let ex_dirs = s.exclude_dirs.clone();
             let ex_files = s.exclude_files.clone();
-            let root = scan_dir_to_node(&dir, &include, &exclude, &ex_dirs, &ex_files);
-            let snap = gather_paths_set(&root);
-            (root, snap)
+            let scan = scan_dir_to_node_with_stats(&dir, &include, &exclude, &ex_dirs, &ex_files);
+            let snap = gather_paths_set(&scan.node);
+            (scan.node, snap, scan.stats)
         };
 
         {
             let mut s = state.borrow_mut();
             s.path_snapshot = Some(snapshot);
             s.root_node = Some(root);
+            s.existing_excluded_dirs = stats.excluded_dirs_found;
+            s.existing_excluded_files = stats.excluded_files_found;
             s.remove_regex = compile_remove_regex_opt(s.remove_regex_str.as_deref());
         }
     }
@@ -1185,7 +1156,7 @@ pub fn on_check_updates(app: &AppWindow, state: &SharedState) {
         state.borrow_mut().fs.dirty = false;
     }
 
-    let (changed, new_root, new_snapshot) = {
+    let (changed, new_scan, new_snapshot) = {
         let s = state.borrow();
         let include = s.include_exts.clone();
         let exclude = s.exclude_exts.clone();
@@ -1193,20 +1164,22 @@ pub fn on_check_updates(app: &AppWindow, state: &SharedState) {
         let ex_files = s.exclude_files.clone();
         let dir = s.selected_directory.as_ref().unwrap().clone();
 
-        let fresh_root = scan_dir_to_node(&dir, &include, &exclude, &ex_dirs, &ex_files);
-        let fresh_snapshot = gather_paths_set(&fresh_root);
+        let scan = scan_dir_to_node_with_stats(&dir, &include, &exclude, &ex_dirs, &ex_files);
+        let fresh_snapshot = gather_paths_set(&scan.node);
         let changed = s
             .path_snapshot
             .as_ref()
             .is_none_or(|old| *old != fresh_snapshot);
-        (changed, fresh_root, fresh_snapshot)
+        (changed, scan, fresh_snapshot)
     };
 
     if changed {
         {
             let mut s = state.borrow_mut();
-            s.root_node = Some(new_root);
+            s.root_node = Some(new_scan.node.clone());
             s.path_snapshot = Some(new_snapshot);
+            s.existing_excluded_dirs = new_scan.stats.excluded_dirs_found;
+            s.existing_excluded_files = new_scan.stats.excluded_files_found;
         }
         refresh_flat_model(app, state);
         return;
