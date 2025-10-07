@@ -328,7 +328,7 @@ component ProfilesPanel inherits VerticalBox {
             viewport := VerticalBox {
                 spacing: 8px;
                 padding: 0px;                 // remove default insets
-                width: parent.width - 5px;     // lock to ScrollView width
+                width: parent.width - 10px;     // lock to ScrollView width
 
                 if (root.selected-profile-index > 0) : LabeledEdit {
                     width: parent.width;                 // match viewport width exactly
@@ -392,20 +392,24 @@ component ProfilesPanel inherits VerticalBox {
                     background: Palette.border;
                 }
                 if (root.show-rust-section) : Text {
+                    width: parent.width;
                     text: "Rust-specific filters";
                     font-weight: 10;
                 }
                 if (root.show-rust-section) : CheckBox {
+                    width: parent.width;
                     text: "Remove inline regular comments (// and /* */)";
                     checked <=> root.rust-remove-inline-comments;
                     toggled => { root.filter-changed(); }
                 }
                 if (root.show-rust-section) : CheckBox {
+                    width: parent.width;
                     text: "Remove doc comments (///, //!, /** */)";
                     checked <=> root.rust-remove-doc-comments;
                     toggled => { root.filter-changed(); }
                 }
                 if (root.show-rust-section) : CheckBox {
+                    width: parent.width;
                     text: "Function signatures only";
                     checked <=> root.rust-function-signatures-only;
                     toggled => { root.filter-changed(); }
