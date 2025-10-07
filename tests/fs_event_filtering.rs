@@ -14,7 +14,7 @@ fn excluded_directory_changes_are_not_relevant() {
 
     let include_exts: HashSet<String> = HashSet::new();
     let exclude_exts: HashSet<String> = HashSet::new();
-    let exclude_dirs: HashSet<String> = ["target".into()].into_iter().collect();
+    let exclude_dirs: HashSet<String> = std::iter::once(String::from("target")).collect();
     let exclude_files: HashSet<String> = HashSet::new();
 
     assert!(
@@ -40,7 +40,7 @@ fn excluded_filename_is_not_relevant() {
     let include_exts: HashSet<String> = HashSet::new();
     let exclude_exts: HashSet<String> = HashSet::new();
     let exclude_dirs: HashSet<String> = HashSet::new();
-    let exclude_files: HashSet<String> = ["LICENSE".into()].into_iter().collect();
+    let exclude_files: HashSet<String> = std::iter::once(String::from("LICENSE")).collect();
 
     assert!(
         !is_event_path_relevant(
@@ -64,7 +64,7 @@ fn include_mode_only_accepts_listed_extensions() {
     let txt_file = root.join("README.txt");
     let dir_path = root.join("src"); // directory change
 
-    let include_exts: HashSet<String> = [".rs".into()].into_iter().collect();
+    let include_exts: HashSet<String> = std::iter::once(String::from(".rs")).collect();
     let exclude_exts: HashSet<String> = HashSet::new();
     let exclude_dirs: HashSet<String> = HashSet::new();
     let exclude_files: HashSet<String> = HashSet::new();
@@ -112,10 +112,10 @@ fn project_root_self_change_is_always_relevant() {
     // abs_path == project_root
     let p: PathBuf = root.clone();
 
-    let include_exts: HashSet<String> = [".rs".into()].into_iter().collect();
+    let include_exts: HashSet<String> = std::iter::once(String::from(".rs")).collect();
     let exclude_exts: HashSet<String> = HashSet::new();
-    let exclude_dirs: HashSet<String> = ["target".into()].into_iter().collect();
-    let exclude_files: HashSet<String> = ["LICENSE".into()].into_iter().collect();
+    let exclude_dirs: HashSet<String> = std::iter::once(String::from("target")).collect();
+    let exclude_files: HashSet<String> = std::iter::once(String::from("LICENSE")).collect();
 
     assert!(
         is_event_path_relevant(

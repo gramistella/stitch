@@ -1,6 +1,6 @@
 use stitch::core::{
-    LocalSettings, Profile, ProfileScope, WorkspaceSettings, clear_stale_current_profile,
-    load_local_settings, save_local_settings, save_profile,
+    LocalSettings, Profile, ProfileScope, RustOptions, WorkspaceSettings,
+    clear_stale_current_profile, load_local_settings, save_local_settings, save_profile,
 };
 use tempfile::TempDir;
 
@@ -48,10 +48,12 @@ fn no_clear_when_shared_profile_exists() {
             remove_regex: String::new(),
             hierarchy_only: false,
             dirs_only: false,
-            rust_remove_inline_comments: false,
-            rust_remove_doc_comments: false,
-            rust_function_signatures_only: false,
-            rust_signatures_only_filter: String::new(),
+            rust: RustOptions {
+                rust_remove_inline_comments: false,
+                rust_remove_doc_comments: false,
+                rust_function_signatures_only: false,
+                rust_signatures_only_filter: String::new(),
+            },
         },
         explicit: vec![],
     };
@@ -85,10 +87,12 @@ fn no_clear_when_local_profile_exists() {
             remove_regex: String::new(),
             hierarchy_only: false,
             dirs_only: false,
-            rust_remove_inline_comments: false,
-            rust_remove_doc_comments: false,
-            rust_function_signatures_only: false,
-            rust_signatures_only_filter: String::new(),
+            rust: RustOptions {
+                rust_remove_inline_comments: false,
+                rust_remove_doc_comments: false,
+                rust_function_signatures_only: false,
+                rust_signatures_only_filter: String::new(),
+            },
         },
         explicit: vec![],
     };

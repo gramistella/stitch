@@ -11,10 +11,10 @@ fn exclude_file_by_basename_overrides_include_ext() {
     fs::write(root.join("show.rs"), "x").unwrap();
     fs::write(root.join("hide.rs"), "x").unwrap();
 
-    let include_exts: HashSet<String> = [".rs".into()].into_iter().collect();
+    let include_exts: HashSet<String> = std::iter::once(String::from(".rs")).collect();
     let exclude_exts: HashSet<String> = HashSet::new();
     let exclude_dirs: HashSet<String> = HashSet::new();
-    let exclude_files: HashSet<String> = ["hide.rs".into()].into_iter().collect();
+    let exclude_files: HashSet<String> = std::iter::once(String::from("hide.rs")).collect();
 
     let tree = scan_dir_to_node(
         root,

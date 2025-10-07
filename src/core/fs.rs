@@ -2,12 +2,14 @@ use crate::core::Node;
 use std::{
     collections::{HashMap, HashSet},
     fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
 };
+
+type NamePath = (String, PathBuf);
 
 /* =========================== Filesystem & paths ============================ */
 
-#[must_use] 
+#[must_use]
 pub fn path_to_unix(p: &Path) -> String {
     let mut s = String::new();
     for (i, comp) in p.iter().enumerate() {
@@ -19,14 +21,14 @@ pub fn path_to_unix(p: &Path) -> String {
     s
 }
 
-#[must_use] 
+#[must_use]
 pub fn is_ancestor_of(ancestor: &Path, p: &Path) -> bool {
     let anc = normalize_path(ancestor);
     let pp = normalize_path(p);
     pp.starts_with(&anc)
 }
 
-#[must_use] 
+#[must_use]
 pub fn normalize_path(p: &Path) -> PathBuf {
     if let Ok(c) = dunce::canonicalize(p) {
         return c;
@@ -64,7 +66,6 @@ pub fn normalize_path(p: &Path) -> PathBuf {
         base.push(c);
     }
 
-    use std::path::Component;
     let mut cleaned = PathBuf::new();
     for comp in base.components() {
         match comp {
@@ -78,39 +79,38 @@ pub fn normalize_path(p: &Path) -> PathBuf {
     cleaned
 }
 
-#[must_use] 
-pub fn scan_dir_to_node(
-    dir: &Path,
-    include_exts: &HashSet<String>,
-    exclude_exts: &HashSet<String>,
-    exclude_dirs: &HashSet<String>,
-    exclude_files: &HashSet<String>,
-) -> Node {
-    #[inline]
-    fn dot_lower_last_ext(p: &Path) -> String {
-        match p.extension() {
-            Some(os) => {
-                if let Some(s) = os.to_str() {
-                    let mut out = String::with_capacity(s.len() + 1);
-                    out.push('.');
-                    for b in s.bytes() {
-                        let lb = if b.is_ascii_uppercase() { b + 32 } else { b };
-                        out.push(lb as char);
-                    }
-                    out
-                } else {
-                    let lossy = os.to_string_lossy();
-                    let lower = lossy.to_lowercase();
-                    let mut out = String::with_capacity(lower.len() + 1);
-                    out.push('.');
-                    out.push_str(&lower);
-                    out
+fn dot_lower_last_ext(p: &Path) -> String {
+    p.extension().map_or_else(String::new, |os| {
+        os.to_str().map_or_else(
+            || {
+                let lossy = os.to_string_lossy();
+                let lower = lossy.to_lowercase();
+                let mut out = String::with_capacity(lower.len() + 1);
+                out.push('.');
+                out.push_str(&lower);
+                out
+            },
+            |s| {
+                let mut out = String::with_capacity(s.len() + 1);
+                out.push('.');
+                for b in s.bytes() {
+                    let lb = if b.is_ascii_uppercase() { b + 32 } else { b };
+                    out.push(lb as char);
                 }
-            }
-            None => String::new(),
-        }
-    }
+                out
+            },
+        )
+    })
+}
 
+#[must_use]
+pub fn scan_dir_to_node<S: ::std::hash::BuildHasher>(
+    dir: &Path,
+    include_exts: &HashSet<String, S>,
+    exclude_exts: &HashSet<String, S>,
+    exclude_dirs: &HashSet<String, S>,
+    exclude_files: &HashSet<String, S>,
+) -> Node {
     let name = dir
         .file_name()
         .unwrap_or_default()
@@ -126,13 +126,65 @@ pub fn scan_dir_to_node(
         has_children: false,
     };
 
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return node,
+    let (mut files, mut dirs) =
+        gather_dir_entries(dir, include_exts, exclude_exts, exclude_dirs, exclude_files);
+
+    files.sort_by(|a, b| a.0.cmp(&b.0));
+    dirs.sort_by(|a, b| a.0.cmp(&b.0));
+
+    node.children.reserve(files.len() + dirs.len());
+
+    for (basename, path) in files {
+        node.has_children = true;
+        node.children.push(Node {
+            name: basename,
+            path,
+            is_dir: false,
+            children: Vec::new(),
+            expanded: false,
+            has_children: false,
+        });
+    }
+
+    let include_mode = !include_exts.is_empty();
+    for (_basename, path) in dirs {
+        let child = scan_dir_to_node(
+            &path,
+            include_exts,
+            exclude_exts,
+            exclude_dirs,
+            exclude_files,
+        );
+
+        let child_visible = if include_mode {
+            !child.children.is_empty() || child.has_children
+        } else {
+            true
+        };
+
+        if child_visible {
+            node.has_children =
+                node.has_children || !child.children.is_empty() || child.has_children;
+            node.children.push(child);
+        }
+    }
+
+    node
+}
+
+fn gather_dir_entries<S: ::std::hash::BuildHasher>(
+    dir: &Path,
+    include_exts: &HashSet<String, S>,
+    exclude_exts: &HashSet<String, S>,
+    exclude_dirs: &HashSet<String, S>,
+    exclude_files: &HashSet<String, S>,
+) -> (Vec<NamePath>, Vec<NamePath>) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return (Vec::new(), Vec::new());
     };
 
-    let mut dirs: Vec<(String, PathBuf)> = Vec::new();
-    let mut files: Vec<(String, PathBuf)> = Vec::new();
+    let mut dirs: Vec<NamePath> = Vec::new();
+    let mut files: Vec<NamePath> = Vec::new();
 
     let include_mode = !include_exts.is_empty();
     let exclude_mode = !exclude_exts.is_empty();
@@ -170,69 +222,31 @@ pub fn scan_dir_to_node(
         }
     }
 
-    files.sort_by(|a, b| a.0.cmp(&b.0));
-    dirs.sort_by(|a, b| a.0.cmp(&b.0));
-
-    node.children.reserve(files.len() + dirs.len());
-
-    for (basename, path) in files {
-        node.has_children = true;
-        node.children.push(Node {
-            name: basename,
-            path,
-            is_dir: false,
-            children: Vec::new(),
-            expanded: false,
-            has_children: false,
-        });
-    }
-
-    for (_basename, path) in dirs {
-        let child = scan_dir_to_node(
-            &path,
-            include_exts,
-            exclude_exts,
-            exclude_dirs,
-            exclude_files,
-        );
-
-        let child_visible = if include_mode {
-            !child.children.is_empty() || child.has_children
-        } else {
-            true
-        };
-
-        if child_visible {
-            node.has_children =
-                node.has_children || !child.children.is_empty() || child.has_children;
-            node.children.push(child);
-        }
-    }
-
-    node
+    (files, dirs)
 }
 
-#[must_use] 
+#[must_use]
 pub fn gather_paths_set(root: &Node) -> HashSet<PathBuf> {
     let mut set = HashSet::new();
-    fn rec(n: &Node, set: &mut HashSet<PathBuf>) {
-        set.insert(n.path.clone());
-        for c in &n.children {
-            rec(c, set);
-        }
-    }
-    rec(root, &mut set);
+    gather_paths_set_rec(root, &mut set);
     set
 }
 
-#[must_use] 
+fn gather_paths_set_rec(n: &Node, set: &mut HashSet<PathBuf>) {
+    set.insert(n.path.clone());
+    for c in &n.children {
+        gather_paths_set_rec(c, set);
+    }
+}
+
+#[must_use]
 pub const fn dir_contains_file(node: &Node) -> bool {
     !node.is_dir || node.has_children
 }
 
-pub fn collect_selected_paths(
+pub fn collect_selected_paths<T: ::std::hash::BuildHasher>(
     node: &Node,
-    explicit: &HashMap<PathBuf, bool>,
+    explicit: &HashMap<PathBuf, bool, T>,
     inherited: Option<bool>,
     files_out: &mut Vec<PathBuf>,
     dirs_out: &mut Vec<PathBuf>,
@@ -256,7 +270,7 @@ pub fn collect_selected_paths(
     }
 }
 
-#[must_use] 
+#[must_use]
 pub fn drain_channel_nonblocking<T>(rx: &std::sync::mpsc::Receiver<T>) -> bool {
     let mut any = false;
     while rx.try_recv().is_ok() {
@@ -265,48 +279,20 @@ pub fn drain_channel_nonblocking<T>(rx: &std::sync::mpsc::Receiver<T>) -> bool {
     any
 }
 
-#[must_use] 
-pub fn is_event_path_relevant(
+#[must_use]
+pub fn is_event_path_relevant<S: ::std::hash::BuildHasher>(
     project_root: &std::path::Path,
     abs_path: &std::path::Path,
-    include_exts: &std::collections::HashSet<String>,
-    exclude_exts: &std::collections::HashSet<String>,
-    exclude_dirs: &std::collections::HashSet<String>,
-    exclude_files: &std::collections::HashSet<String>,
+    include_exts: &std::collections::HashSet<String, S>,
+    exclude_exts: &std::collections::HashSet<String, S>,
+    exclude_dirs: &std::collections::HashSet<String, S>,
+    exclude_files: &std::collections::HashSet<String, S>,
 ) -> bool {
-    use std::path::{Component, Path};
-
-    #[inline]
-    fn dot_lower_last_ext(p: &Path) -> String {
-        match p.extension() {
-            Some(os) => {
-                if let Some(s) = os.to_str() {
-                    let mut out = String::with_capacity(s.len() + 1);
-                    out.push('.');
-                    for b in s.bytes() {
-                        let lb = if b.is_ascii_uppercase() { b + 32 } else { b };
-                        out.push(lb as char);
-                    }
-                    out
-                } else {
-                    let lossy = os.to_string_lossy();
-                    let lower = lossy.to_lowercase();
-                    let mut out = String::with_capacity(lower.len() + 1);
-                    out.push('.');
-                    out.push_str(&lower);
-                    out
-                }
-            }
-            None => String::new(),
-        }
-    }
-
     if !abs_path.starts_with(project_root) {
         return false;
     }
-    let rel = match abs_path.strip_prefix(project_root) {
-        Ok(r) => r,
-        Err(_) => return false,
+    let Ok(rel) = abs_path.strip_prefix(project_root) else {
+        return false;
     };
 
     // Root itself: always relevant (forces one rescan if the root flips metadata)

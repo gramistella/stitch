@@ -38,7 +38,7 @@ proptest! {
         let tree = render_unicode_tree_from_paths(&paths, Some("root"));
         let parsed = parse_hierarchy_text(&tree).expect("root line is present");
 
-        for p in paths.into_iter() {
+        for p in paths {
             prop_assert!(parsed.contains(&p),
                 "parsed set must contain original path: {p}\nRendered:\n{tree}");
         }

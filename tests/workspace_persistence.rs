@@ -1,6 +1,6 @@
 use stitch::core::{
-    WorkspaceSettings, ensure_workspace_dir, load_workspace, save_workspace, workspace_dir,
-    workspace_file,
+    RustOptions, WorkspaceSettings, ensure_workspace_dir, load_workspace, save_workspace,
+    workspace_dir, workspace_file,
 };
 use tempfile::TempDir;
 
@@ -35,10 +35,12 @@ fn save_then_load_roundtrip_and_overwrite_is_atomic() {
         remove_regex: "\"\"\"(?m)^\\s*TODO:.*$\"\"\"".into(),
         hierarchy_only: false,
         dirs_only: false,
-        rust_remove_inline_comments: true,
-        rust_remove_doc_comments: true,
-        rust_function_signatures_only: false,
-        rust_signatures_only_filter: String::new(),
+        rust: RustOptions {
+            rust_remove_inline_comments: true,
+            rust_remove_doc_comments: true,
+            rust_function_signatures_only: false,
+            rust_signatures_only_filter: String::new(),
+        },
     };
     save_workspace(root, &s1).expect("save v1");
 
@@ -55,28 +57,28 @@ fn save_then_load_roundtrip_and_overwrite_is_atomic() {
     assert_eq!(loaded1.hierarchy_only, s1.hierarchy_only);
     assert_eq!(loaded1.dirs_only, s1.dirs_only);
     assert_eq!(
-        loaded1.rust_remove_inline_comments,
-        s1.rust_remove_inline_comments
+        loaded1.rust.rust_remove_inline_comments,
+        s1.rust.rust_remove_inline_comments
     );
     assert_eq!(
-        loaded1.rust_remove_doc_comments,
-        s1.rust_remove_doc_comments
+        loaded1.rust.rust_remove_doc_comments,
+        s1.rust.rust_remove_doc_comments
     );
     assert_eq!(
-        loaded1.rust_function_signatures_only,
-        s1.rust_function_signatures_only
+        loaded1.rust.rust_function_signatures_only,
+        s1.rust.rust_function_signatures_only
     );
 
     let mut s2 = loaded1;
     s2.ext_filter = ".rs".into();
     s2.hierarchy_only = true;
-    s2.rust_signatures_only_filter = "src/*,tests/*".into();
+    s2.rust.rust_signatures_only_filter = "src/*,tests/*".into();
     save_workspace(root, &s2).expect("save v2 overwrite");
 
     let loaded2 = load_workspace(root).expect("load s2");
     assert_eq!(loaded2.ext_filter, ".rs");
     assert!(loaded2.hierarchy_only);
-    assert_eq!(loaded2.rust_signatures_only_filter, "src/*,tests/*");
+    assert_eq!(loaded2.rust.rust_signatures_only_filter, "src/*,tests/*");
 
     let tmp_path = wf.with_extension("json.tmp");
     assert!(

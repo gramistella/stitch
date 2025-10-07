@@ -1,9 +1,8 @@
 // benches/stitch_bench.rs
-use criterion::{
-    BatchSize, BenchmarkId, Criterion, Throughput, black_box, criterion_group, criterion_main,
-};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 use std::collections::HashSet;
 use std::fs;
+use std::hint::black_box;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tempfile::TempDir;
@@ -125,7 +124,7 @@ fn bench_scan_dir_to_node(c: &mut Criterion) {
     let fx = &*FS_FIXTURE;
 
     let include: HashSet<String> = HashSet::new();
-    let exclude_exts: HashSet<String> = [".lock".into()].into_iter().collect();
+    let exclude_exts: HashSet<String> = std::iter::once(String::from(".lock")).collect();
     let exclude_dirs: HashSet<String> = ["vendor".into(), "target".into(), "node_modules".into()]
         .into_iter()
         .collect();

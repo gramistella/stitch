@@ -22,7 +22,7 @@ fn scanner_ignores_stitchworkspace_when_excluded_by_name() {
     // Exclude `.stitchworkspace` by directory name.
     let include_exts: HashSet<String> = HashSet::new();
     let exclude_exts: HashSet<String> = HashSet::new();
-    let exclude_dirs: HashSet<String> = [".stitchworkspace".into()].into_iter().collect();
+    let exclude_dirs: HashSet<String> = std::iter::once(String::from(".stitchworkspace")).collect();
     let exclude_files: HashSet<String> = HashSet::new();
 
     let tree = scan_dir_to_node(
@@ -56,7 +56,7 @@ fn fs_event_relevance_ignores_workspace_dir_changes_when_excluded() {
     // Filters: explicitly exclude `.stitchworkspace`
     let include_exts: HashSet<String> = HashSet::new();
     let exclude_exts: HashSet<String> = HashSet::new();
-    let exclude_dirs: HashSet<String> = [".stitchworkspace".into()].into_iter().collect();
+    let exclude_dirs: HashSet<String> = std::iter::once(String::from(".stitchworkspace")).collect();
     let exclude_files: HashSet<String> = HashSet::new();
 
     // Changes inside the excluded workspace dir should be ignored

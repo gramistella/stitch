@@ -12,7 +12,7 @@ fn include_mode_shows_intermediate_dirs_with_deeper_matches() {
     fs::create_dir_all(root.join("a/b/c")).unwrap();
     fs::write(root.join("a/b/c/file.rs"), "x").unwrap();
 
-    let include_exts: HashSet<String> = [".rs".into()].into_iter().collect();
+    let include_exts: HashSet<String> = std::iter::once(String::from(".rs")).collect();
     let exclude_exts: HashSet<String> = HashSet::new();
     let exclude_dirs: HashSet<String> = HashSet::new();
     let exclude_files: HashSet<String> = HashSet::new();

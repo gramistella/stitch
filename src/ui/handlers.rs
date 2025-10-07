@@ -1,9 +1,10 @@
 use super::{AppWindow, Row};
-use crate::ui::state::SharedState;
+use crate::ui::state::{CommentRemoval, SharedState};
 use chrono::Local;
 use slint::{ComponentHandle, Model, ModelRc, VecModel};
 use std::{
-    collections::HashMap,
+    cmp::Ordering,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
 };
@@ -12,16 +13,117 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::sync::mpsc;
 
 use stitch::core::{
-    Node, Profile, ProfileScope, RustFilterOptions, WorkspaceSettings, apply_rust_filters,
-    clean_remove_regex, collapse_consecutive_blank_lines, collect_selected_paths,
-    compile_remove_regex_opt, delete_profile, ensure_profiles_dirs, ensure_workspace_dir,
-    gather_paths_set, is_ancestor_of, is_rust_file_path, list_profiles, load_local_settings,
-    load_profile, load_workspace, parse_extension_filters, parse_hierarchy_text, path_to_unix,
-    render_unicode_tree_from_paths, save_local_settings, save_profile, save_workspace,
-    scan_dir_to_node, signatures_filter_matches, split_prefix_list,
+    Node, Profile, ProfileScope, RustFilterOptions, RustOptions, WorkspaceSettings,
+    apply_rust_filters, clean_remove_regex, collapse_consecutive_blank_lines,
+    collect_selected_paths, compile_remove_regex_opt, delete_profile, ensure_profiles_dirs,
+    ensure_workspace_dir, gather_paths_set, is_ancestor_of, is_rust_file_path, list_profiles,
+    load_local_settings, load_profile, load_workspace, parse_extension_filters,
+    parse_hierarchy_text, path_to_unix, render_unicode_tree_from_paths, save_local_settings,
+    save_profile, save_workspace, scan_dir_to_node, signatures_filter_matches, split_prefix_list,
 };
 
+fn walk_and_mark(
+    node: &Node,
+    project_root: &Path,
+    wanted: &std::collections::HashSet<String>,
+    explicit: &mut HashMap<PathBuf, bool>,
+) {
+    if node.is_dir {
+        for c in &node.children {
+            walk_and_mark(c, project_root, wanted, explicit);
+        }
+    } else if let Ok(rel) = node.path.strip_prefix(project_root) {
+        let key = rel
+            .iter()
+            .map(|c| c.to_string_lossy())
+            .collect::<Vec<_>>()
+            .join("/");
+        if wanted.contains(&key) {
+            explicit.insert(node.path.clone(), true);
+        }
+    }
+}
+
 const UI_OUTPUT_CHAR_LIMIT: usize = 50_000;
+
+#[cfg(feature = "tokens")]
+const MAX_TOKENIZE_BYTES: usize = 16 * 1024 * 1024;
+
+struct SelectionSnapshot {
+    files: Vec<PathBuf>,
+    relative_paths: Vec<String>,
+    selected_dir: PathBuf,
+    root_name: String,
+}
+
+enum SelectionError {
+    NoFolder,
+    NoItems,
+}
+
+struct GenerationJob {
+    header: String,
+    files: Vec<PathBuf>,
+    selected_dir: PathBuf,
+    remove_prefixes: Vec<String>,
+    remove_regex: Option<regex::Regex>,
+    rust_opts: RustFilterOptions,
+    rust_sig_filter: String,
+    tx: mpsc::Sender<(u64, String)>,
+    seq: u64,
+}
+
+struct NotesContext {
+    exclude_dirs: Vec<String>,
+    exclude_files: Vec<String>,
+    include_exts: HashSet<String>,
+    exclude_exts: HashSet<String>,
+    remove_prefixes: Vec<String>,
+    has_remove_regex: bool,
+    comment_removal: CommentRemoval,
+    signatures_filter: Option<String>,
+}
+
+struct SelectedPresence {
+    entries: std::collections::BTreeSet<String>,
+}
+
+fn profile_vec_index(idx: i32) -> Option<usize> {
+    usize::try_from(idx).ok().and_then(|i| i.checked_sub(1))
+}
+
+impl SelectedPresence {
+    fn new(paths: &[String]) -> Self {
+        let entries = paths.iter().cloned().collect();
+        Self { entries }
+    }
+
+    fn has_file(&self, rel: &str) -> bool {
+        self.entries.contains(rel)
+    }
+
+    fn has_dir(&self, rel: &str) -> bool {
+        self.entries
+            .iter()
+            .any(|p| p == rel || p.starts_with(&(rel.to_owned() + "/")))
+    }
+
+    fn collect_present_extensions(&self, filters: &HashSet<String>) -> Vec<String> {
+        let mut present = std::collections::BTreeSet::new();
+        for rel in &self.entries {
+            if let Some(ext) = std::path::Path::new(rel)
+                .extension()
+                .and_then(|e| e.to_str())
+            {
+                let dot = format!(".{}", ext.to_lowercase());
+                if filters.contains(&dot) {
+                    present.insert(dot);
+                }
+            }
+        }
+        present.into_iter().collect()
+    }
+}
 
 /* =============================== UI Actions =============================== */
 
@@ -30,9 +132,8 @@ pub fn apply_selection_from_text(app: &AppWindow, state: &SharedState, text: &st
         let s = state.borrow();
         (s.root_node.clone(), s.selected_directory.clone())
     };
-    let (root, selected_dir) = match (root_opt, selected_dir_opt) {
-        (Some(r), Some(d)) => (r, d),
-        _ => return,
+    let (Some(root), Some(selected_dir)) = (root_opt, selected_dir_opt) else {
+        return;
     };
 
     let wanted = match parse_hierarchy_text(text) {
@@ -43,28 +144,6 @@ pub fn apply_selection_from_text(app: &AppWindow, state: &SharedState, text: &st
     {
         let mut s = state.borrow_mut();
         s.explicit_states.clear();
-    }
-
-    fn walk_and_mark(
-        node: &Node,
-        project_root: &Path,
-        wanted: &std::collections::HashSet<String>,
-        explicit: &mut std::collections::HashMap<PathBuf, bool>,
-    ) {
-        if node.is_dir {
-            for c in &node.children {
-                walk_and_mark(c, project_root, wanted, explicit);
-            }
-        } else if let Ok(rel) = node.path.strip_prefix(project_root) {
-            let key = rel
-                .iter()
-                .map(|c| c.to_string_lossy())
-                .collect::<Vec<_>>()
-                .join("/");
-            if wanted.contains(&key) {
-                explicit.insert(node.path.clone(), true);
-            }
-        }
     }
 
     {
@@ -86,7 +165,7 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
             s.selected_directory = Some(dir.clone());
             s.explicit_states.clear();
             s.last_mod_times.clear();
-            s.fs_dirty = true;
+            s.fs.dirty = true;
         }
 
         app.set_project_path(format_project_path_for_title(&dir).into());
@@ -104,10 +183,10 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
             app.set_hierarchy_only(ws.hierarchy_only);
             app.set_dirs_only(ws.dirs_only);
             app.set_show_rust_section(false);
-            app.set_rust_remove_inline_comments(ws.rust_remove_inline_comments);
-            app.set_rust_remove_doc_comments(ws.rust_remove_doc_comments);
-            app.set_rust_function_signatures_only(ws.rust_function_signatures_only);
-            app.set_rust_signatures_only_filter(ws.rust_signatures_only_filter.clone().into());
+            app.set_rust_remove_inline_comments(ws.rust.rust_remove_inline_comments);
+            app.set_rust_remove_doc_comments(ws.rust.rust_remove_doc_comments);
+            app.set_rust_function_signatures_only(ws.rust.rust_function_signatures_only);
+            app.set_rust_signatures_only_filter(ws.rust.rust_signatures_only_filter.clone().into());
 
             state.borrow_mut().workspace_baseline = Some(ws.clone());
         } else {
@@ -120,10 +199,12 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
                 remove_regex: app.get_remove_regex().to_string(),
                 hierarchy_only: app.get_hierarchy_only(),
                 dirs_only: app.get_dirs_only(),
-                rust_remove_inline_comments: app.get_rust_remove_inline_comments(),
-                rust_remove_doc_comments: app.get_rust_remove_doc_comments(),
-                rust_function_signatures_only: app.get_rust_function_signatures_only(),
-                rust_signatures_only_filter: app.get_rust_signatures_only_filter().to_string(),
+                rust: RustOptions {
+                    rust_remove_inline_comments: app.get_rust_remove_inline_comments(),
+                    rust_remove_doc_comments: app.get_rust_remove_doc_comments(),
+                    rust_function_signatures_only: app.get_rust_function_signatures_only(),
+                    rust_signatures_only_filter: app.get_rust_signatures_only_filter().to_string(),
+                },
             };
             let _ = save_workspace(&dir, &seed);
             state.borrow_mut().workspace_baseline = Some(seed);
@@ -149,13 +230,13 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
         parse_filters_from_ui(app, state);
 
         // Only start fs watcher if it's not disabled
-        if !state.borrow().disable_fs_watcher {
+        if !state.borrow().fs.watcher_disabled {
             let _ = start_fs_watcher(app, state);
         }
         rebuild_tree_and_ui(app, state);
         update_last_refresh(app);
 
-        state.borrow_mut().fs_dirty = false;
+        state.borrow_mut().fs.dirty = false;
     }
 }
 
@@ -204,7 +285,7 @@ pub fn on_toggle_fs_watcher(app: &AppWindow, state: &SharedState) {
 
     {
         let mut s = state.borrow_mut();
-        s.disable_fs_watcher = disable_fs_watcher;
+        s.fs.watcher_disabled = disable_fs_watcher;
     }
 
     if disable_fs_watcher {
@@ -221,15 +302,8 @@ pub fn on_toggle_fs_watcher(app: &AppWindow, state: &SharedState) {
 }
 
 pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
-    // Coalesce clicks: if a run is active, queue a single re-run and show a tiny placeholder.
-    {
-        let mut s = state.borrow_mut();
-        if s.is_generating {
-            s.regen_after = true;
-            app.set_output_text("⏳ Generating… (queued)".into());
-            app.set_output_stats("".into());
-            return;
-        }
+    if handle_generation_in_progress(app, state) {
+        return;
     }
 
     parse_filters_from_ui(app, state);
@@ -238,83 +312,120 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
     let hierarchy_only = app.get_hierarchy_only();
     let disable_notes = app.get_disable_notes_section();
 
-    // Basic guards
-    let no_folder_selected = {
-        let s = state.borrow();
-        s.selected_directory.is_none() || s.root_node.is_none()
-    };
-    if no_folder_selected {
-        set_output(app, state, NO_FOLDER_SELECTED);
-        update_last_refresh(app);
-        return;
-    }
-
-    // Collect the selection & render the hierarchy header on the UI thread (cheap)
-    let (selected_files, selected_dirs, relative_paths, selected_dir, root_name) = {
-        let s = state.borrow();
-        let root = s.root_node.as_ref().unwrap();
-        let mut files = Vec::new();
-        let mut dirs = Vec::new();
-        collect_selected_paths(root, &s.explicit_states, None, &mut files, &mut dirs);
-
-        let selected_dir = s.selected_directory.as_ref().unwrap().clone();
-
-        let mut rels = Vec::new();
-        if want_dirs_only {
-            for d in &dirs {
-                if let Ok(r) = d.strip_prefix(&selected_dir)
-                    && !r.as_os_str().is_empty()
-                {
-                    rels.push(path_to_unix(r));
-                }
-            }
-        } else {
-            for f in &files {
-                if let Ok(r) = f.strip_prefix(&selected_dir)
-                    && !r.as_os_str().is_empty()
-                {
-                    rels.push(path_to_unix(r));
-                }
-            }
+    let selection = match collect_selection_snapshot(state, want_dirs_only) {
+        Ok(snapshot) => snapshot,
+        Err(SelectionError::NoFolder) => {
+            set_output(app, state, NO_FOLDER_SELECTED);
+            update_last_refresh(app);
+            return;
         }
-
-        let root_name = selected_dir
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .to_string();
-
-        (files, dirs, rels, selected_dir, root_name)
+        Err(SelectionError::NoItems) => {
+            set_output(app, state, NO_ITEMS_SELECTED);
+            update_last_refresh(app);
+            return;
+        }
     };
 
-    if (!want_dirs_only && selected_files.is_empty())
-        || (want_dirs_only && selected_dirs.is_empty())
-    {
-        set_output(app, state, NO_ITEMS_SELECTED);
-        update_last_refresh(app);
-        return;
-    }
-
-    // Touch mtimes (cheap metadata)
     if !want_dirs_only {
-        let mut s = state.borrow_mut();
-        for fp in &selected_files {
-            let mtime = fs::metadata(fp).ok().and_then(|m| m.modified().ok());
-            s.last_mod_times.insert(fp.clone(), mtime);
+        update_last_mod_times(state, &selection.files);
+    }
+
+    let header = build_hierarchy_header(state, &selection, disable_notes);
+
+    if hierarchy_only || want_dirs_only {
+        set_output(app, state, &header);
+        update_last_refresh(app);
+        return;
+    }
+
+    prepare_async_generation(app, state, selection, header);
+}
+
+fn handle_generation_in_progress(app: &AppWindow, state: &SharedState) -> bool {
+    let mut s = state.borrow_mut();
+    if s.generation.in_progress {
+        s.generation.queue_another = true;
+        app.set_output_text("⏳ Generating… (queued)".into());
+        app.set_output_stats("".into());
+        return true;
+    }
+    false
+}
+
+fn collect_selection_snapshot(
+    state: &SharedState,
+    want_dirs_only: bool,
+) -> Result<SelectionSnapshot, SelectionError> {
+    let s = state.borrow();
+    let Some(root) = s.root_node.as_ref() else {
+        return Err(SelectionError::NoFolder);
+    };
+    let Some(selected_dir) = s.selected_directory.as_ref() else {
+        return Err(SelectionError::NoFolder);
+    };
+
+    let mut files = Vec::new();
+    let mut dirs = Vec::new();
+    collect_selected_paths(root, &s.explicit_states, None, &mut files, &mut dirs);
+
+    if (!want_dirs_only && files.is_empty()) || (want_dirs_only && dirs.is_empty()) {
+        return Err(SelectionError::NoItems);
+    }
+
+    let mut rels = Vec::new();
+    if want_dirs_only {
+        for d in &dirs {
+            if let Ok(r) = d.strip_prefix(selected_dir)
+                && !r.as_os_str().is_empty()
+            {
+                rels.push(path_to_unix(r));
+            }
+        }
+    } else {
+        for f in &files {
+            if let Ok(r) = f.strip_prefix(selected_dir)
+                && !r.as_os_str().is_empty()
+            {
+                rels.push(path_to_unix(r));
+            }
         }
     }
 
-    // Render the hierarchy now (instant feedback)
-    let mut header = String::new();
-    header.push_str("=== FILE HIERARCHY ===\n\n");
+    let root_name = selected_dir
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .to_string();
+
+    Ok(SelectionSnapshot {
+        files,
+        relative_paths: rels,
+        selected_dir: selected_dir.clone(),
+        root_name,
+    })
+}
+
+fn update_last_mod_times(state: &SharedState, files: &[PathBuf]) {
+    let mut s = state.borrow_mut();
+    for fp in files {
+        let mtime = fs::metadata(fp).ok().and_then(|m| m.modified().ok());
+        s.last_mod_times.insert(fp.clone(), mtime);
+    }
+}
+
+fn build_hierarchy_header(
+    state: &SharedState,
+    selection: &SelectionSnapshot,
+    disable_notes: bool,
+) -> String {
+    let mut header = String::from("=== FILE HIERARCHY ===\n\n");
     header.push_str(&render_unicode_tree_from_paths(
-        &relative_paths,
-        Some(&root_name),
+        &selection.relative_paths,
+        Some(&selection.root_name),
     ));
 
-    // Optional Notes section
     if !disable_notes {
-        let notes = build_notes_section(state, &selected_dir, &relative_paths);
+        let notes = build_notes_section(state, &selection.selected_dir, &selection.relative_paths);
         if !notes.trim().is_empty() {
             header.push_str("\n=== NOTES ===\n\n");
             header.push_str(&notes);
@@ -322,139 +433,277 @@ pub fn on_generate_output(app: &AppWindow, state: &SharedState) {
         }
     }
 
-    // If only hierarchy/dirs, finish synchronously.
-    if hierarchy_only || want_dirs_only {
-        set_output(app, state, &header);
-        update_last_refresh(app);
-        return;
-    }
+    header
+}
 
-    // ---- Heavy path: read + scrub files on a worker thread ----
-
-    // Tiny in-place placeholder (don’t clobber state.full_output_text; set_output() will do that later)
+fn prepare_async_generation(
+    app: &AppWindow,
+    state: &SharedState,
+    selection: SelectionSnapshot,
+    header: String,
+) {
     app.set_output_text("⏳ Generating…".into());
     app.set_output_stats("".into());
 
-    // Snapshot params for the worker
-    let remove_prefixes = { state.borrow().remove_prefixes.clone() };
-    let remove_regex_opt = { state.borrow().remove_regex.clone() };
-    let files_to_read = selected_files;
-    let selected_dir_for_rel = selected_dir;
-    let rust_opts = {
-        let s = state.borrow();
-        RustFilterOptions {
-            remove_inline_regular_comments: s.rust_remove_inline_comments,
-            remove_doc_comments: s.rust_remove_doc_comments,
-            function_signatures_only: s.rust_function_signatures_only,
-        }
-    };
-    let rust_sig_filter = app.get_rust_signatures_only_filter().to_string();
+    ensure_generation_channel(app, state);
+    let job = build_generation_job(state, selection, header);
+    spawn_generation_worker(job);
+}
 
-    // Ensure a result channel & start a UI-thread pump (if not already running)
-    {
-        let mut s = state.borrow_mut();
-        if s.gen_result_tx.is_none() || s.gen_result_rx.is_none() {
-            let (tx, rx) = mpsc::channel::<(u64, String)>();
-            s.gen_result_tx = Some(tx);
-            s.gen_result_rx = Some(rx);
-
-            let app_weak = app.as_weak();
-            let state_rc = state.clone();
-            s.gen_pump_timer.start(
-                slint::TimerMode::Repeated,
-                std::time::Duration::from_millis(120),
-                move || {
-                    if let (Some(app), Some(out)) = (app_weak.upgrade(), {
-                        // Drain to the latest message, if any
-                        let mut last: Option<(u64, String)> = None;
-                        if let Some(rx) = state_rc.borrow().gen_result_rx.as_ref() {
-                            while let Ok(msg) = rx.try_recv() {
-                                last = Some(msg);
-                            }
-                        }
-                        last.map(|(_, s)| s)
-                    }) {
-                        // Apply final output on the UI thread
-                        set_output(&app, &state_rc, &out);
-                        update_last_refresh(&app);
-
-                        // Flip flags and maybe coalesced re-run
-                        let rerun = {
-                            let mut st = state_rc.borrow_mut();
-                            st.is_generating = false;
-                            let again = st.regen_after;
-                            st.regen_after = false;
-                            again
-                        };
-
-                        if rerun {
-                            on_generate_output(&app, &state_rc);
-                        }
-                    }
-                },
-            );
-        }
-
-        s.is_generating = true;
-        s.regen_after = false;
-        s.gen_seq = s.gen_seq.wrapping_add(1);
+fn ensure_generation_channel(app: &AppWindow, state: &SharedState) {
+    let mut s = state.borrow_mut();
+    if s.gen_result_tx.is_some() && s.gen_result_rx.is_some() {
+        return;
     }
-    let my_seq = { state.borrow().gen_seq };
 
-    // Spawn worker (captures only Send things)
-    let tx = { state.borrow().gen_result_tx.as_ref().unwrap().clone() };
-    std::thread::spawn(move || {
-        let mut out = header;
-        out.push_str("\n=== FILE CONTENTS ===\n\n");
+    let (tx, rx) = mpsc::channel::<(u64, String)>();
+    s.gen_result_tx = Some(tx);
+    s.gen_result_rx = Some(rx);
 
-        for fp in files_to_read {
-            let rel: PathBuf = fp
-                .strip_prefix(&selected_dir_for_rel).map_or_else(|_| PathBuf::from(fp.file_name().unwrap_or_default()), std::path::Path::to_path_buf);
+    let app_weak = app.as_weak();
+    let state_rc = state.clone();
+    s.gen_pump_timer.start(
+        slint::TimerMode::Repeated,
+        std::time::Duration::from_millis(120),
+        move || {
+            if let (Some(app), Some(out)) = (app_weak.upgrade(), drain_latest_result(&state_rc)) {
+                set_output(&app, &state_rc, &out);
+                update_last_refresh(&app);
 
-            let mut contents = match fs::read_to_string(&fp) {
-                Ok(c) => c,
-                Err(_) => continue,
-            };
+                let rerun = {
+                    let mut st = state_rc.borrow_mut();
+                    st.generation.in_progress = false;
+                    let again = st.generation.queue_another;
+                    st.generation.queue_another = false;
+                    again
+                };
 
-            if !remove_prefixes.is_empty() {
-                contents =
-                    stitch::core::strip_lines_and_inline_comments(&contents, &remove_prefixes);
-            }
-            if let Some(rr) = &remove_regex_opt {
-                contents = rr.replace_all(&contents, "").to_string();
-            }
-
-            if is_rust_file_path(&fp) {
-                // Signatures-only may be restricted via filter; compute rel path for matching
-                let rel_for_match = rel
-                    .iter()
-                    .map(|c| c.to_string_lossy())
-                    .collect::<Vec<_>>()
-                    .join("/");
-                let mut eff = rust_opts.clone();
-                if !rust_sig_filter.trim().is_empty()
-                    && !signatures_filter_matches(&rel_for_match, &rust_sig_filter)
-                {
-                    eff.function_signatures_only = false;
+                if rerun {
+                    on_generate_output(&app, &state_rc);
                 }
-                contents = apply_rust_filters(&contents, &eff);
             }
+        },
+    );
+}
 
-            out.push_str(&format!(
-                "--- Start of file: {} ---\n",
-                rel.to_string_lossy()
-            ));
-            out.push_str(&contents);
-            out.push('\n');
-            out.push_str(&format!(
-                "--- End of file: {} ---\n\n",
-                rel.to_string_lossy()
-            ));
+fn drain_latest_result(state: &SharedState) -> Option<String> {
+    let mut last: Option<(u64, String)> = None;
+    let guard = state.borrow();
+    if let Some(rx) = guard.gen_result_rx.as_ref() {
+        while let Ok(msg) = rx.try_recv() {
+            last = Some(msg);
+        }
+    }
+    drop(guard);
+    last.map(|(_, s)| s)
+}
+
+fn build_generation_job(
+    state: &SharedState,
+    selection: SelectionSnapshot,
+    header: String,
+) -> GenerationJob {
+    let SelectionSnapshot {
+        files,
+        selected_dir,
+        ..
+    } = selection;
+
+    let (remove_prefixes, remove_regex, rust_opts, rust_sig_filter) = {
+        let s = state.borrow();
+        let comment = s.rust_ui.comment_removal;
+        let opts = RustFilterOptions {
+            remove_inline_regular_comments: comment.removes_inline(),
+            remove_doc_comments: comment.removes_doc(),
+            function_signatures_only: s.rust_ui.signatures_filter.is_some(),
+        };
+        let filter = s.rust_ui.signatures_filter.clone().unwrap_or_default();
+        (
+            s.remove_prefixes.clone(),
+            s.remove_regex.clone(),
+            opts,
+            filter,
+        )
+    };
+
+    let tx = {
+        let s = state.borrow();
+        s.gen_result_tx
+            .clone()
+            .expect("generation channel must exist")
+    };
+
+    let seq = {
+        let mut s = state.borrow_mut();
+        s.generation.in_progress = true;
+        s.generation.queue_another = false;
+        s.gen_seq = s.gen_seq.wrapping_add(1);
+        s.gen_seq
+    };
+
+    GenerationJob {
+        header,
+        files,
+        selected_dir,
+        remove_prefixes,
+        remove_regex,
+        rust_opts,
+        rust_sig_filter,
+        tx,
+        seq,
+    }
+}
+
+fn spawn_generation_worker(job: GenerationJob) {
+    std::thread::spawn(move || run_generation_job(job));
+}
+
+fn run_generation_job(job: GenerationJob) {
+    use std::fmt::Write;
+
+    let GenerationJob {
+        mut header,
+        files,
+        selected_dir,
+        remove_prefixes,
+        remove_regex,
+        rust_opts,
+        rust_sig_filter,
+        tx,
+        seq,
+    } = job;
+
+    header.push_str("\n=== FILE CONTENTS ===\n\n");
+    let mut out = header;
+
+    for fp in files {
+        let rel: PathBuf = fp.strip_prefix(&selected_dir).map_or_else(
+            |_| PathBuf::from(fp.file_name().unwrap_or_default()),
+            std::path::Path::to_path_buf,
+        );
+
+        let Ok(mut contents) = fs::read_to_string(&fp) else {
+            continue;
+        };
+
+        if !remove_prefixes.is_empty() {
+            contents = stitch::core::strip_lines_and_inline_comments(&contents, &remove_prefixes);
+        }
+        if let Some(rr) = &remove_regex {
+            contents = rr.replace_all(&contents, "").to_string();
         }
 
-        // Send final result back to the UI thread pump
-        let _ = tx.send((my_seq, out));
-    });
+        if is_rust_file_path(&fp) {
+            let rel_for_match = rel
+                .iter()
+                .map(|c| c.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/");
+            let mut eff = rust_opts.clone();
+            if !rust_sig_filter.trim().is_empty()
+                && !signatures_filter_matches(&rel_for_match, &rust_sig_filter)
+            {
+                eff.function_signatures_only = false;
+            }
+            contents = apply_rust_filters(&contents, &eff);
+        }
+
+        let rel_display = rel.to_string_lossy().into_owned();
+        let _ = writeln!(out, "--- Start of file: {rel_display} ---");
+        out.push_str(&contents);
+        out.push('\n');
+        let _ = writeln!(out, "--- End of file: {rel_display} ---\n");
+    }
+
+    let _ = tx.send((seq, out));
+}
+
+fn note_excluded_dirs(ctx: &NotesContext, selected: &SelectedPresence) -> Option<String> {
+    if ctx.exclude_dirs.is_empty() {
+        return None;
+    }
+    let mut present: Vec<String> = ctx
+        .exclude_dirs
+        .iter()
+        .filter(|d| selected.has_dir(d))
+        .cloned()
+        .collect();
+    present.sort();
+    if present.is_empty() {
+        None
+    } else {
+        Some(format!("Excluded directories: {}", present.join(", ")))
+    }
+}
+
+fn note_excluded_files(ctx: &NotesContext, selected: &SelectedPresence) -> Option<String> {
+    if ctx.exclude_files.is_empty() {
+        return None;
+    }
+    let mut present: Vec<String> = ctx
+        .exclude_files
+        .iter()
+        .filter(|f| selected.has_file(f))
+        .cloned()
+        .collect();
+    present.sort();
+    if present.is_empty() {
+        None
+    } else {
+        Some(format!("Excluded files: {}", present.join(", ")))
+    }
+}
+
+fn note_extension_filters(ctx: &NotesContext, selected: &SelectedPresence) -> Vec<String> {
+    let mut lines = Vec::new();
+    if !ctx.include_exts.is_empty() {
+        let present = selected.collect_present_extensions(&ctx.include_exts);
+        if !present.is_empty() {
+            lines.push(format!("Included extensions: {}", present.join(", ")));
+        }
+    }
+    if !ctx.exclude_exts.is_empty() {
+        let present = selected.collect_present_extensions(&ctx.exclude_exts);
+        if !present.is_empty() {
+            lines.push(format!("Excluded extensions: {}", present.join(", ")));
+        }
+    }
+    lines
+}
+
+fn note_remove_settings(ctx: &NotesContext) -> Vec<String> {
+    let mut lines = Vec::new();
+    if !ctx.remove_prefixes.is_empty() {
+        lines.push(format!(
+            "Removed lines starting with: {}",
+            ctx.remove_prefixes.join(", ")
+        ));
+    }
+    if ctx.has_remove_regex {
+        lines.push("Applied remove-regex".to_string());
+    }
+    lines
+}
+
+fn note_rust_settings(ctx: &NotesContext) -> Vec<String> {
+    let mut lines = Vec::new();
+    let comment_removal = ctx.comment_removal;
+    if comment_removal.removes_inline() {
+        lines.push("Removed Rust inline comments (//, /* */)".to_string());
+    }
+    if comment_removal.removes_doc() {
+        lines.push("Removed Rust doc comments (///, //!, /** */)".to_string());
+    }
+    if let Some(filter) = ctx.signatures_filter.as_ref() {
+        if filter.trim().is_empty() {
+            lines.push("Functions bodies omitted (signatures only) for all Rust files".to_string());
+        } else {
+            lines.push(format!(
+                "Functions bodies omitted (signatures only) for: {filter}"
+            ));
+        }
+    }
+    lines
 }
 
 fn build_notes_section(
@@ -462,128 +711,32 @@ fn build_notes_section(
     _project_root: &std::path::Path,
     rel_selected_paths: &[String],
 ) -> String {
-    use std::collections::BTreeSet;
-    let s = state.borrow();
-    let mut lines: Vec<String> = Vec::new();
-
-    // Helpers: presence filtering
-    let selected_set: BTreeSet<String> = rel_selected_paths.iter().cloned().collect();
-    let exists_rel_file = |rel: &str| selected_set.contains(rel);
-    let exists_rel_dir = |rel: &str| {
-        selected_set
-            .iter()
-            .any(|p| p == rel || p.starts_with(&(rel.to_string() + "/")))
+    let ctx = {
+        let s = state.borrow();
+        NotesContext {
+            exclude_dirs: s.exclude_dirs.iter().cloned().collect(),
+            exclude_files: s.exclude_files.iter().cloned().collect(),
+            include_exts: s.include_exts.clone(),
+            exclude_exts: s.exclude_exts.clone(),
+            remove_prefixes: s.remove_prefixes.clone(),
+            has_remove_regex: s.remove_regex.is_some(),
+            comment_removal: s.rust_ui.comment_removal,
+            signatures_filter: s.rust_ui.signatures_filter.clone(),
+        }
     };
 
-    // Excluded directories that actually exist
-    if !s.exclude_dirs.is_empty() {
-        let mut present: Vec<String> = s
-            .exclude_dirs
-            .iter()
-            .filter_map(|d| {
-                let drel = d.as_str();
-                if exists_rel_dir(drel) {
-                    Some(drel.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        present.sort();
-        if !present.is_empty() {
-            lines.push(format!("Excluded directories: {}", present.join(", ")));
-        }
-    }
+    let selected = SelectedPresence::new(rel_selected_paths);
+    let mut lines: Vec<String> = Vec::new();
 
-    // Excluded files that actually exist
-    if !s.exclude_files.is_empty() {
-        let mut present: Vec<String> = s
-            .exclude_files
-            .iter()
-            .filter_map(|f| {
-                if exists_rel_file(f) {
-                    Some(f.clone())
-                } else {
-                    None
-                }
-            })
-            .collect();
-        present.sort();
-        if !present.is_empty() {
-            lines.push(format!("Excluded files: {}", present.join(", ")));
-        }
+    if let Some(line) = note_excluded_dirs(&ctx, &selected) {
+        lines.push(line);
     }
-
-    // Extension filters (only note those that actually apply to selected files)
-    if !s.include_exts.is_empty() {
-        let mut present: BTreeSet<String> = BTreeSet::new();
-        for rel in rel_selected_paths {
-            if let Some(ext) = std::path::Path::new(rel)
-                .extension()
-                .and_then(|e| e.to_str())
-            {
-                let dot = format!(".{}", ext.to_lowercase());
-                if s.include_exts.contains(&dot) {
-                    present.insert(dot);
-                }
-            }
-        }
-        if !present.is_empty() {
-            lines.push(format!(
-                "Included extensions: {}",
-                present.into_iter().collect::<Vec<_>>().join(", ")
-            ));
-        }
+    if let Some(line) = note_excluded_files(&ctx, &selected) {
+        lines.push(line);
     }
-    if !s.exclude_exts.is_empty() {
-        let mut present: BTreeSet<String> = BTreeSet::new();
-        for rel in rel_selected_paths {
-            if let Some(ext) = std::path::Path::new(rel)
-                .extension()
-                .and_then(|e| e.to_str())
-            {
-                let dot = format!(".{}", ext.to_lowercase());
-                if s.exclude_exts.contains(&dot) {
-                    present.insert(dot);
-                }
-            }
-        }
-        if !present.is_empty() {
-            lines.push(format!(
-                "Excluded extensions: {}",
-                present.into_iter().collect::<Vec<_>>().join(", ")
-            ));
-        }
-    }
-
-    // Remove prefixes (only if enabled and selected files contain any line starting with them). We keep a light note.
-    if !s.remove_prefixes.is_empty() {
-        lines.push(format!(
-            "Removed lines starting with: {}",
-            s.remove_prefixes.join(", ")
-        ));
-    }
-    if s.remove_regex.is_some() {
-        lines.push("Applied remove-regex".to_string());
-    }
-
-    // Rust-specific notes, with scoping
-    if s.rust_remove_inline_comments {
-        lines.push("Removed Rust inline comments (//, /* */)".to_string());
-    }
-    if s.rust_remove_doc_comments {
-        lines.push("Removed Rust doc comments (///, //!, /** */)".to_string());
-    }
-    if s.rust_function_signatures_only {
-        if s.rust_signatures_only_filter.trim().is_empty() {
-            lines.push("Functions bodies omitted (signatures only) for all Rust files".to_string());
-        } else {
-            lines.push(format!(
-                "Functions bodies omitted (signatures only) for: {}",
-                s.rust_signatures_only_filter
-            ));
-        }
-    }
+    lines.extend(note_extension_filters(&ctx, &selected));
+    lines.extend(note_remove_settings(&ctx));
+    lines.extend(note_rust_settings(&ctx));
 
     lines.join("\n")
 }
@@ -611,10 +764,7 @@ pub fn on_copy_output(app: &AppWindow, state: &SharedState) {
         return;
     }
 
-    let mut ok = false;
-    if let Ok(mut cb) = arboard::Clipboard::new() {
-        ok = cb.set_text(text).is_ok();
-    }
+    let ok = arboard::Clipboard::new().is_ok_and(move |mut cb| cb.set_text(text).is_ok());
 
     app.set_copy_toast_text(if ok { "Copied!" } else { "Copy failed" }.into());
     app.set_show_copy_toast(true);
@@ -675,11 +825,10 @@ pub fn rebuild_tree_and_ui(app: &AppWindow, state: &SharedState) {
                 if *any {
                     return;
                 }
-                if !n.is_dir
-                    && n.path.extension().and_then(|e| e.to_str()) == Some("rs") {
-                        *any = true;
-                        return;
-                    }
+                if !n.is_dir && n.path.extension().and_then(|e| e.to_str()) == Some("rs") {
+                    *any = true;
+                    return;
+                }
                 for c in &n.children {
                     rec(c, any);
                 }
@@ -691,7 +840,7 @@ pub fn rebuild_tree_and_ui(app: &AppWindow, state: &SharedState) {
     app.set_show_rust_section(has_rs);
     {
         let mut s = state.borrow_mut();
-        s.has_rust_files = has_rs;
+        s.rust_ui.has_files = has_rs;
     }
 }
 
@@ -721,7 +870,7 @@ fn parse_filters_from_ui(app: &AppWindow, state: &SharedState) {
 
     exclude_dirs_set.insert(".stitchworkspace".to_string());
 
-    let remove_regex_str = {
+    let mut remove_regex_str = {
         let cleaned = clean_remove_regex(&remove_regex_raw);
         if cleaned.trim().is_empty() {
             None
@@ -730,6 +879,8 @@ fn parse_filters_from_ui(app: &AppWindow, state: &SharedState) {
         }
     };
 
+    let remove_regex = compile_remove_regex_opt(remove_regex_str.as_deref());
+
     {
         let mut st = state.borrow_mut();
         st.include_exts = include_exts;
@@ -737,12 +888,16 @@ fn parse_filters_from_ui(app: &AppWindow, state: &SharedState) {
         st.exclude_dirs = exclude_dirs_set;
         st.exclude_files = exclude_files_set;
         st.remove_prefixes = split_prefix_list(&remove_prefix_raw);
-        st.remove_regex_str = remove_regex_str.clone();
-        st.remove_regex = compile_remove_regex_opt(remove_regex_str.as_deref());
-        st.rust_remove_inline_comments = app.get_rust_remove_inline_comments();
-        st.rust_remove_doc_comments = app.get_rust_remove_doc_comments();
-        st.rust_function_signatures_only = app.get_rust_function_signatures_only();
-        st.rust_signatures_only_filter = app.get_rust_signatures_only_filter().to_string();
+        st.remove_regex_str = remove_regex_str.take();
+        st.remove_regex = remove_regex;
+        let remove_inline = app.get_rust_remove_inline_comments();
+        let remove_doc = app.get_rust_remove_doc_comments();
+        st.rust_ui.comment_removal = CommentRemoval::from_flags(remove_inline, remove_doc);
+        st.rust_ui.signatures_filter = if app.get_rust_function_signatures_only() {
+            Some(app.get_rust_signatures_only_filter().to_string())
+        } else {
+            None
+        };
     }
 
     let Some(dir) = state.borrow().selected_directory.clone() else {
@@ -756,9 +911,9 @@ fn parse_filters_from_ui(app: &AppWindow, state: &SharedState) {
         return;
     }
 
-    if idx > 0
+    if let Some(profile_idx) = profile_vec_index(idx)
         && let mut local_settings = load_local_settings(&dir).unwrap_or_default()
-        && let Some(meta) = state.borrow().profiles.get((idx as usize) - 1)
+        && let Some(meta) = state.borrow().profiles.get(profile_idx)
     {
         local_settings.current_profile = Some(meta.name.clone());
         let _ = save_local_settings(&dir, &local_settings);
@@ -813,7 +968,6 @@ fn flatten_tree(
     inherited: Option<bool>,
     level: usize,
 ) -> Vec<Row> {
-    let mut rows = Vec::new();
     fn walk(
         n: &Node,
         explicit: &HashMap<PathBuf, bool>,
@@ -830,7 +984,7 @@ fn flatten_tree(
         rows.push(Row {
             path: n.path.to_string_lossy().to_string().into(),
             name: n.name.clone().into(),
-            level: level as i32,
+            level: i32::try_from(level).unwrap_or(i32::MAX),
             is_dir: n.is_dir,
             expanded: if n.is_dir { n.expanded } else { false },
             checked: effective,
@@ -843,6 +997,7 @@ fn flatten_tree(
             }
         }
     }
+    let mut rows = Vec::new();
     walk(root, explicit, inherited, level, &mut rows);
     rows
 }
@@ -866,7 +1021,7 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
 
     {
         let mut st = state.borrow_mut();
-        st.full_output_text = normalized.clone();
+        st.full_output_text.clone_from(&normalized);
     }
 
     // Check if this is a placeholder message that shouldn't count towards stats
@@ -886,8 +1041,6 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
     #[cfg(feature = "tokens")]
     {
         app.set_output_stats(format!("{total_chars} chars • … tokens • {total_lines} LOC").into());
-
-        const MAX_TOKENIZE_BYTES: usize = 16 * 1024 * 1024;
         let text = normalized.clone();
         let app_weak = app.as_weak();
 
@@ -965,13 +1118,13 @@ fn split_csv_set(s: &slint::SharedString) -> std::collections::HashSet<String> {
 pub fn on_check_updates(app: &AppWindow, state: &SharedState) {
     let should_scan = {
         let s = state.borrow();
-        s.selected_directory.is_some() && s.root_node.is_some() && s.fs_dirty
+        s.selected_directory.is_some() && s.root_node.is_some() && s.fs.dirty
     };
     if !should_scan {
         return;
     }
     {
-        state.borrow_mut().fs_dirty = false;
+        state.borrow_mut().fs.dirty = false;
     }
 
     let (changed, new_root, new_snapshot) = {
@@ -984,10 +1137,10 @@ pub fn on_check_updates(app: &AppWindow, state: &SharedState) {
 
         let fresh_root = scan_dir_to_node(&dir, &include, &exclude, &ex_dirs, &ex_files);
         let fresh_snapshot = gather_paths_set(&fresh_root);
-        let changed = match &s.path_snapshot {
-            None => true,
-            Some(old) => *old != fresh_snapshot,
-        };
+        let changed = s
+            .path_snapshot
+            .as_ref()
+            .is_none_or(|old| *old != fresh_snapshot);
         (changed, fresh_root, fresh_snapshot)
     };
 
@@ -1078,7 +1231,7 @@ fn start_fs_watcher(app: &AppWindow, state: &SharedState) -> notify::Result<()> 
                     };
 
                     if any_relevant {
-                        state_rc.borrow_mut().fs_dirty = true;
+                        state_rc.borrow_mut().fs.dirty = true;
                         on_check_updates(&app, &state_rc);
                     }
                 }
@@ -1143,18 +1296,16 @@ fn refresh_profiles_ui(app: &AppWindow, state: &SharedState) {
         )
         .and_then(|s| s.current_profile);
 
-        let idx = if let Some(sel) = current_profile_name {
+        let idx = current_profile_name.map_or(0, |sel| {
             let mut found = 0i32;
             for (i, name) in names.iter().enumerate().skip(1) {
                 if name.as_str() == sel {
-                    found = i as i32;
+                    found = i32::try_from(i).unwrap_or(i32::MAX);
                     break;
                 }
             }
             found
-        } else {
-            0
-        };
+        });
 
         (names, idx)
     };
@@ -1164,7 +1315,9 @@ fn refresh_profiles_ui(app: &AppWindow, state: &SharedState) {
     let model_len = app.get_profiles().row_count();
     let clamped_idx = if model_len == 0 {
         -1
-    } else if desired_idx >= 0 && (desired_idx as usize) < model_len {
+    } else if let Ok(desired_idx_usize) = usize::try_from(desired_idx)
+        && desired_idx_usize < model_len
+    {
         desired_idx
     } else {
         0
@@ -1193,10 +1346,12 @@ fn capture_profile_from_ui(app: &AppWindow, state: &SharedState, name: &str) -> 
         remove_regex: app.get_remove_regex().to_string(),
         hierarchy_only: app.get_hierarchy_only(),
         dirs_only: app.get_dirs_only(),
-        rust_remove_inline_comments: app.get_rust_remove_inline_comments(),
-        rust_remove_doc_comments: app.get_rust_remove_doc_comments(),
-        rust_function_signatures_only: app.get_rust_function_signatures_only(),
-        rust_signatures_only_filter: app.get_rust_signatures_only_filter().to_string(),
+        rust: RustOptions {
+            rust_remove_inline_comments: app.get_rust_remove_inline_comments(),
+            rust_remove_doc_comments: app.get_rust_remove_doc_comments(),
+            rust_function_signatures_only: app.get_rust_function_signatures_only(),
+            rust_signatures_only_filter: app.get_rust_signatures_only_filter().to_string(),
+        },
     };
 
     // NOTE: Preserve root selection by storing an empty relative path ("")
@@ -1206,16 +1361,14 @@ fn capture_profile_from_ui(app: &AppWindow, state: &SharedState, name: &str) -> 
         s.explicit_states
             .iter()
             .filter_map(|(abs, &st)| {
-                if let Ok(rel) = abs.strip_prefix(&dir) {
+                abs.strip_prefix(&dir).ok().map(|rel| {
                     let path = if rel.as_os_str().is_empty() {
-                        String::new() // represents project root selected
+                        String::new()
                     } else {
                         path_to_unix(rel)
                     };
-                    Some(stitch::core::ProfileSelection { path, state: st })
-                } else {
-                    None
-                }
+                    stitch::core::ProfileSelection { path, state: st }
+                })
             })
             .collect::<Vec<_>>()
     };
@@ -1235,11 +1388,16 @@ fn apply_profile_to_ui(app: &AppWindow, state: &SharedState, profile: &Profile) 
     app.set_remove_regex(profile.settings.remove_regex.clone().into());
     app.set_hierarchy_only(profile.settings.hierarchy_only);
     app.set_dirs_only(profile.settings.dirs_only);
-    app.set_rust_remove_inline_comments(profile.settings.rust_remove_inline_comments);
-    app.set_rust_remove_doc_comments(profile.settings.rust_remove_doc_comments);
-    app.set_rust_function_signatures_only(profile.settings.rust_function_signatures_only);
+    app.set_rust_remove_inline_comments(profile.settings.rust.rust_remove_inline_comments);
+    app.set_rust_remove_doc_comments(profile.settings.rust.rust_remove_doc_comments);
+    app.set_rust_function_signatures_only(profile.settings.rust.rust_function_signatures_only);
     app.set_rust_signatures_only_filter(
-        profile.settings.rust_signatures_only_filter.clone().into(),
+        profile
+            .settings
+            .rust
+            .rust_signatures_only_filter
+            .clone()
+            .into(),
     );
 
     app.set_profile_name(profile.name.clone().into());
@@ -1305,9 +1463,13 @@ pub fn on_select_profile(app: &AppWindow, state: &SharedState, index: i32) {
         return;
     }
 
+    let Some(profile_idx) = profile_vec_index(index) else {
+        return;
+    };
+
     let (name, _scope) = {
         let s = state.borrow();
-        let Some(meta) = s.profiles.get((index as usize) - 1) else {
+        let Some(meta) = s.profiles.get(profile_idx) else {
             return;
         };
         (meta.name.clone(), meta.scope)
@@ -1341,10 +1503,12 @@ pub fn on_save_profile_current(app: &AppWindow, state: &SharedState) {
             remove_regex: app.get_remove_regex().to_string(),
             hierarchy_only: app.get_hierarchy_only(),
             dirs_only: app.get_dirs_only(),
-            rust_remove_inline_comments: app.get_rust_remove_inline_comments(),
-            rust_remove_doc_comments: app.get_rust_remove_doc_comments(),
-            rust_function_signatures_only: app.get_rust_function_signatures_only(),
-            rust_signatures_only_filter: app.get_rust_signatures_only_filter().to_string(),
+            rust: RustOptions {
+                rust_remove_inline_comments: app.get_rust_remove_inline_comments(),
+                rust_remove_doc_comments: app.get_rust_remove_doc_comments(),
+                rust_function_signatures_only: app.get_rust_function_signatures_only(),
+                rust_signatures_only_filter: app.get_rust_signatures_only_filter().to_string(),
+            },
         };
 
         let _ = save_workspace(&project_root, &ws);
@@ -1357,12 +1521,16 @@ pub fn on_save_profile_current(app: &AppWindow, state: &SharedState) {
         return;
     }
 
+    let Some(profile_idx) = profile_vec_index(idx) else {
+        return;
+    };
+
     let (old_name, scope, project_root) = {
         let s = state.borrow();
         let Some(dir) = s.selected_directory.clone() else {
             return;
         };
-        let Some(meta) = s.profiles.get((idx as usize).saturating_sub(1)) else {
+        let Some(meta) = s.profiles.get(profile_idx) else {
             return;
         };
         (meta.name.clone(), meta.scope, dir)
@@ -1440,13 +1608,14 @@ pub fn on_save_profile_as(app: &AppWindow, state: &SharedState) {
 
                 // 5) Belt-and-suspenders: explicitly set selection to the new profile.
                 //    (Index 0 is "— Workspace —", profiles start at 1.)
-                let new_idx: i32 = {
+                let new_idx = {
                     let s = state_rc.borrow();
-                    (s.profiles
+                    let pos = s
+                        .profiles
                         .iter()
                         .position(|m| m.name == profile.name)
-                        .unwrap_or(0) as i32)
-                        + 1
+                        .unwrap_or(0);
+                    i32::try_from(pos).map_or(i32::MAX, |p| p.saturating_add(1))
                 };
                 app.set_selected_profile_index(new_idx);
                 // Also schedule on the event loop to avoid races with UI updates.
@@ -1492,15 +1661,14 @@ fn profiles_equal(a: &Profile, b: &Profile) -> bool {
         || sa.remove_regex != sb.remove_regex
         || sa.hierarchy_only != sb.hierarchy_only
         || sa.dirs_only != sb.dirs_only
-        || sa.rust_remove_inline_comments != sb.rust_remove_inline_comments
-        || sa.rust_remove_doc_comments != sb.rust_remove_doc_comments
-        || sa.rust_function_signatures_only != sb.rust_function_signatures_only
-        || sa.rust_signatures_only_filter != sb.rust_signatures_only_filter
+        || sa.rust.rust_remove_inline_comments != sb.rust.rust_remove_inline_comments
+        || sa.rust.rust_remove_doc_comments != sb.rust.rust_remove_doc_comments
+        || sa.rust.rust_function_signatures_only != sb.rust.rust_function_signatures_only
+        || sa.rust.rust_signatures_only_filter != sb.rust.rust_signatures_only_filter
     {
         return false;
     }
     // Compare explicit selections ignoring order
-    use std::cmp::Ordering;
     let mut ea = a.explicit.clone();
     let mut eb = b.explicit.clone();
     ea.sort_by(|x, y| match x.path.cmp(&y.path) {
@@ -1533,17 +1701,16 @@ fn update_save_button_state(app: &AppWindow, state: &SharedState) {
             remove_regex: app.get_remove_regex().to_string(),
             hierarchy_only: app.get_hierarchy_only(),
             dirs_only: app.get_dirs_only(),
-            rust_remove_inline_comments: app.get_rust_remove_inline_comments(),
-            rust_remove_doc_comments: app.get_rust_remove_doc_comments(),
-            rust_function_signatures_only: app.get_rust_function_signatures_only(),
-            rust_signatures_only_filter: app.get_rust_signatures_only_filter().to_string(),
+            rust: RustOptions {
+                rust_remove_inline_comments: app.get_rust_remove_inline_comments(),
+                rust_remove_doc_comments: app.get_rust_remove_doc_comments(),
+                rust_function_signatures_only: app.get_rust_function_signatures_only(),
+                rust_signatures_only_filter: app.get_rust_signatures_only_filter().to_string(),
+            },
         };
 
         let baseline_opt = { state.borrow().workspace_baseline.clone() };
-        let dirty = match baseline_opt {
-            Some(b) => !workspace_settings_equal(&b, &current),
-            None => true,
-        };
+        let dirty = baseline_opt.is_none_or(|b| !workspace_settings_equal(&b, &current));
         app.set_save_enabled(dirty);
         return;
     }
@@ -1562,10 +1729,7 @@ fn update_save_button_state(app: &AppWindow, state: &SharedState) {
     };
 
     let baseline_opt = { state.borrow().profile_baseline.clone() };
-    let dirty = match baseline_opt {
-        Some(b) => !profiles_equal(&b, &current),
-        None => true,
-    };
+    let dirty = baseline_opt.is_none_or(|b| !profiles_equal(&b, &current));
     app.set_save_enabled(dirty);
 }
 
@@ -1574,24 +1738,23 @@ pub fn on_profile_name_changed(app: &AppWindow, state: &SharedState) {
 }
 
 pub fn on_delete_profile(app: &AppWindow, state: &SharedState) {
-    let (idx, root, meta_opt) = {
-        let s = state.borrow();
-        (
-            app.get_selected_profile_index(),
-            s.selected_directory.clone(),
-            s.profiles
-                .get((app.get_selected_profile_index() as usize).saturating_sub(1))
-                .cloned(),
-        )
-    };
+    let idx = app.get_selected_profile_index();
     if idx <= 0 {
         return;
     }
-    let Some(project_root) = root else {
+    let Some(profile_idx) = profile_vec_index(idx) else {
         return;
     };
-    let Some(meta) = meta_opt else {
-        return;
+
+    let (project_root, meta) = {
+        let s = state.borrow();
+        let Some(project_root) = s.selected_directory.clone() else {
+            return;
+        };
+        let Some(meta) = s.profiles.get(profile_idx).cloned() else {
+            return;
+        };
+        (project_root, meta)
     };
 
     let _ = delete_profile(&project_root, meta.scope, &meta.name);
@@ -1677,12 +1840,10 @@ pub fn on_discard_changes(app: &AppWindow, state: &SharedState) {
     }
 
     // Fallback: load from disk if baseline isn't present
+    let profile_idx_opt = profile_vec_index(idx);
     let (name_opt, root_opt) = {
         let s = state.borrow();
-        let name = s
-            .profiles
-            .get((idx as usize).saturating_sub(1))
-            .map(|m| m.name.clone());
+        let name = profile_idx_opt.and_then(|i| s.profiles.get(i).map(|m| m.name.clone()));
         (name, s.selected_directory.clone())
     };
 
@@ -1707,10 +1868,7 @@ fn workspace_settings_equal(a: &WorkspaceSettings, b: &WorkspaceSettings) -> boo
         && a.remove_regex == b.remove_regex
         && a.hierarchy_only == b.hierarchy_only
         && a.dirs_only == b.dirs_only
-        && a.rust_remove_inline_comments == b.rust_remove_inline_comments
-        && a.rust_remove_doc_comments == b.rust_remove_doc_comments
-        && a.rust_function_signatures_only == b.rust_function_signatures_only
-        && a.rust_signatures_only_filter == b.rust_signatures_only_filter
+        && a.rust == b.rust
     // Note: we intentionally ignore `current_profile` here for dirtiness comparison
 }
 

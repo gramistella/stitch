@@ -17,6 +17,12 @@ pub struct WorkspaceSettings {
     pub remove_regex: String,
     pub hierarchy_only: bool,
     pub dirs_only: bool,
+    #[serde(flatten)]
+    pub rust: RustOptions,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct RustOptions {
     #[serde(default)]
     pub rust_remove_inline_comments: bool,
     #[serde(default)]
@@ -64,30 +70,35 @@ pub struct ProfileMeta {
 
 /* ========================= Paths & basic workspace ========================= */
 
-#[must_use] 
+#[must_use]
 pub fn workspace_dir(project_root: &Path) -> PathBuf {
     project_root.join(".stitchworkspace")
 }
 
-#[must_use] 
+#[must_use]
 pub fn workspace_file(project_root: &Path) -> PathBuf {
     workspace_dir(project_root).join("workspace.json")
 }
 
-#[must_use] 
+#[must_use]
 pub fn local_settings_file(project_root: &Path) -> PathBuf {
     workspace_dir(project_root)
         .join("local")
         .join("settings.json")
 }
 
+/// Create the workspace directory structure if missing.
+///
+/// # Errors
+/// Returns I/O errors from directory creation or file operations when persisting metadata.
 pub fn ensure_workspace_dir(project_root: &Path) -> io::Result<PathBuf> {
     let dir = workspace_dir(project_root);
-    let mut created = false;
-    if !dir.exists() {
+    let created = if dir.exists() {
+        false
+    } else {
         fs::create_dir_all(&dir)?;
-        created = true;
-    }
+        true
+    };
 
     // On first creation, try to ensure the local folder is ignored by git.
     if created {
@@ -153,6 +164,10 @@ fn profiles_local_dir(project_root: &Path) -> PathBuf {
     workspace_dir(project_root).join("local").join("profiles")
 }
 
+/// Ensure shared and local profiles directories exist.
+///
+/// # Errors
+/// Returns I/O errors if directory creation fails.
 pub fn ensure_profiles_dirs(project_root: &Path) -> io::Result<()> {
     fs::create_dir_all(profiles_shared_dir(project_root))?;
     fs::create_dir_all(profiles_local_dir(project_root))?;
@@ -186,13 +201,17 @@ fn profile_path(project_root: &Path, scope: ProfileScope, name: &str) -> PathBuf
 
 /* =============================== Workspace IO ============================== */
 
-#[must_use] 
+#[must_use]
 pub fn load_workspace(project_root: &Path) -> Option<WorkspaceSettings> {
     let path = workspace_file(project_root);
     let data = fs::read(&path).ok()?;
     serde_json::from_slice::<WorkspaceSettings>(&data).ok()
 }
 
+/// Save the workspace settings atomically.
+///
+/// # Errors
+/// Returns I/O errors from writing/renaming files, or serialization errors.
 pub fn save_workspace(project_root: &Path, settings: &WorkspaceSettings) -> io::Result<()> {
     ensure_workspace_dir(project_root)?;
 
@@ -206,13 +225,18 @@ pub fn save_workspace(project_root: &Path, settings: &WorkspaceSettings) -> io::
     Ok(())
 }
 
-#[must_use] 
+/// Load per-user local settings for this workspace.
+#[must_use]
 pub fn load_local_settings(project_root: &Path) -> Option<LocalSettings> {
     let path = local_settings_file(project_root);
     let data = fs::read(&path).ok()?;
     serde_json::from_slice::<LocalSettings>(&data).ok()
 }
 
+/// Save per-user local settings atomically.
+///
+/// # Errors
+/// Returns I/O errors from writing/renaming files, or serialization errors.
 pub fn save_local_settings(project_root: &Path, settings: &LocalSettings) -> io::Result<()> {
     ensure_workspace_dir(project_root)?;
     let path = local_settings_file(project_root);
@@ -230,6 +254,10 @@ pub fn save_local_settings(project_root: &Path, settings: &LocalSettings) -> io:
 
 /* =============================== Profiles IO =============================== */
 
+/// Save a profile JSON file atomically for the given scope.
+///
+/// # Errors
+/// Returns I/O errors from writing/renaming files, or serialization errors.
 pub fn save_profile(project_root: &Path, profile: &Profile, scope: ProfileScope) -> io::Result<()> {
     ensure_profiles_dirs(project_root)?;
     let path = profile_path(project_root, scope, &profile.name);
@@ -241,7 +269,7 @@ pub fn save_profile(project_root: &Path, profile: &Profile, scope: ProfileScope)
 }
 
 /// Returns (Profile, Scope) preferring Local if both exist.
-#[must_use] 
+#[must_use]
 pub fn load_profile(project_root: &Path, name: &str) -> Option<(Profile, ProfileScope)> {
     let local = profile_path(project_root, ProfileScope::Local, name);
     if let Ok(bytes) = fs::read(&local)
@@ -258,6 +286,10 @@ pub fn load_profile(project_root: &Path, name: &str) -> Option<(Profile, Profile
     None
 }
 
+/// Delete a profile JSON file for the given scope if it exists.
+///
+/// # Errors
+/// Returns I/O errors only on unexpected failures writing to the filesystem.
 pub fn delete_profile(project_root: &Path, scope: ProfileScope, name: &str) -> io::Result<()> {
     let path = profile_path(project_root, scope, name);
     if path.exists() {
@@ -268,7 +300,7 @@ pub fn delete_profile(project_root: &Path, scope: ProfileScope, name: &str) -> i
 }
 
 /// Lists all profiles found. If a name exists in both scopes, only the Local one is returned.
-#[must_use] 
+#[must_use]
 pub fn list_profiles(project_root: &Path) -> Vec<ProfileMeta> {
     // Scan a directory for *.json profiles and capture (display_name, scope, timestamp-key)
     // Display name comes from the Profile JSON's `name` field (unsanitized),
@@ -299,8 +331,10 @@ pub fn list_profiles(project_root: &Path) -> Vec<ProfileMeta> {
                     .and_then(|bytes| serde_json::from_slice::<Profile>(&bytes).ok())
                 {
                     Some(p) if !p.name.trim().is_empty() => p.name,
-                    _ => path
-                        .file_stem().map_or_else(|| "unnamed".to_string(), |os| os.to_string_lossy().to_string()),
+                    _ => path.file_stem().map_or_else(
+                        || "unnamed".to_string(),
+                        |os| os.to_string_lossy().to_string(),
+                    ),
                 };
 
                 out.push((display_name, scope, ts_key));
@@ -321,8 +355,8 @@ pub fn list_profiles(project_root: &Path) -> Vec<ProfileMeta> {
     );
 
     // Deduplicate by *display name*, prefer Local over Shared, and for same scope prefer newest ts.
-    use std::collections::BTreeMap;
-    let mut by_name: BTreeMap<String, (ProfileScope, u128)> = BTreeMap::new();
+    let mut by_name: std::collections::BTreeMap<String, (ProfileScope, u128)> =
+        std::collections::BTreeMap::new();
     for (name, scope, ts) in raw {
         match by_name.get(&name) {
             None => {
@@ -352,6 +386,10 @@ pub fn list_profiles(project_root: &Path) -> Vec<ProfileMeta> {
         .collect()
 }
 
+/// Remove a stale current profile reference if the profile no longer exists.
+///
+/// # Errors
+/// Returns I/O errors from saving updated local settings.
 pub fn clear_stale_current_profile(project_root: &Path) -> io::Result<bool> {
     let mut local_settings = load_local_settings(project_root).unwrap_or_default();
 

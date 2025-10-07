@@ -28,9 +28,9 @@ fn include_multidot_extension_documents_last_segment_behavior() {
     let tree = scan_dir_to_node(root, &include, &exclude_exts, &ex_dirs, &ex_files);
 
     // Under current behavior, "archive.tar.gz" will NOT be included because ".tar.gz" != ".gz".
-    let names: Vec<_> = tree.children.iter().map(|n| n.name.as_str()).collect();
+    let has_archive = tree.children.iter().any(|n| n.name == "archive.tar.gz");
     assert!(
-        !names.contains(&"archive.tar.gz"),
+        !has_archive,
         "Currently, include set is matched against the last extension only (\".gz\"). \
 Consider normalizing multi-dot semantics if you want a different behavior."
     );

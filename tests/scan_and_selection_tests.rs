@@ -40,9 +40,9 @@ fn scan_dir_include_takes_precedence_over_exclude() {
     mkfile(&root.join("show.rs"));
     mkfile(&root.join("hide.rs"));
 
-    let include: HashSet<String> = [".rs".into()].into_iter().collect();
+    let include: HashSet<String> = std::iter::once(String::from(".rs")).collect();
     // Even if .rs is in the exclude set, include takes precedence because include_exts is non-empty
-    let exclude_exts: HashSet<String> = [".rs".into()].into_iter().collect();
+    let exclude_exts: HashSet<String> = std::iter::once(String::from(".rs")).collect();
     let ex_dirs: HashSet<String> = HashSet::new();
     let ex_files: HashSet<String> = HashSet::new();
 
@@ -63,8 +63,8 @@ fn scan_dir_respects_exclude_files_and_exclude_dirs() {
 
     let include: HashSet<String> = HashSet::new();
     let exclude_exts: HashSet<String> = HashSet::new();
-    let exclude_dirs: HashSet<String> = ["node_modules".into()].into_iter().collect();
-    let exclude_files: HashSet<String> = ["LICENSE".into()].into_iter().collect();
+    let exclude_dirs: HashSet<String> = std::iter::once(String::from("node_modules")).collect();
+    let exclude_files: HashSet<String> = std::iter::once(String::from("LICENSE")).collect();
 
     let tree = scan_dir_to_node(root, &include, &exclude_exts, &exclude_dirs, &exclude_files);
     let names: Vec<_> = tree.children.iter().map(|n| n.name.as_str()).collect();

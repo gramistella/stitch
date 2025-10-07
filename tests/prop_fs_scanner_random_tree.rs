@@ -64,10 +64,9 @@ fn make_on_disk(root: &Path, files: &[FileSpec]) {
 fn last_ext_of_filename(fname: &str) -> String {
     use std::path::Path;
     let p = Path::new(fname);
-    match p.extension() {
-        Some(e) => format!(".{}", e.to_string_lossy().to_lowercase()),
-        None => String::new(),
-    }
+    p.extension().map_or_else(String::new, |e| {
+        format!(".{}", e.to_string_lossy().to_lowercase())
+    })
 }
 
 fn collect_tree_paths(
@@ -135,6 +134,19 @@ fn order_ok_everywhere(node: &Node) -> bool {
         n.children.iter().filter(|c| c.is_dir).all(check)
     }
     check(node)
+}
+
+fn fs_case_insensitive(root: &Path) -> bool {
+    let probe = root.join("CiProbe");
+    let _ = std::fs::create_dir(&probe);
+    let insensitive_alias = root.join("ciprobe");
+    let exists = insensitive_alias.exists();
+    let _ = std::fs::remove_dir_all(&probe);
+    exists
+}
+
+fn lower_set(set: &BTreeSet<String>) -> BTreeSet<String> {
+    set.iter().map(|s| s.to_lowercase()).collect()
 }
 
 fn any_component_in<'a>(
@@ -242,19 +254,6 @@ proptest! {
 
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
-
-        // --- helpers (scoped to this test) ---
-        fn fs_case_insensitive(root: &std::path::Path) -> bool {
-            let probe = root.join("CiProbe");
-            let _ = std::fs::create_dir(&probe);
-            let insensitive_alias = root.join("ciprobe");
-            let is_ci = insensitive_alias.exists();
-            let _ = std::fs::remove_dir_all(&probe);
-            is_ci
-        }
-        fn lower_set(set: &BTreeSet<String>) -> BTreeSet<String> {
-            set.iter().map(|s| s.to_lowercase()).collect()
-        }
 
         // Materialize the random tree.
         make_on_disk(root, &files);

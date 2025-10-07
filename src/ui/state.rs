@@ -9,6 +9,56 @@ use std::{
 };
 
 #[derive(Default)]
+pub struct FsState {
+    pub dirty: bool,
+    pub watcher_disabled: bool,
+}
+
+#[derive(Default)]
+pub struct GenerationState {
+    pub in_progress: bool,
+    pub queue_another: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CommentRemoval {
+    #[default]
+    None,
+    InlineOnly,
+    DocOnly,
+    InlineAndDoc,
+}
+
+impl CommentRemoval {
+    #[must_use]
+    pub const fn removes_inline(self) -> bool {
+        matches!(self, Self::InlineOnly | Self::InlineAndDoc)
+    }
+
+    #[must_use]
+    pub const fn removes_doc(self) -> bool {
+        matches!(self, Self::DocOnly | Self::InlineAndDoc)
+    }
+
+    #[must_use]
+    pub const fn from_flags(remove_inline: bool, remove_doc: bool) -> Self {
+        match (remove_inline, remove_doc) {
+            (true, true) => Self::InlineAndDoc,
+            (true, false) => Self::InlineOnly,
+            (false, true) => Self::DocOnly,
+            (false, false) => Self::None,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct RustUiState {
+    pub has_files: bool,
+    pub comment_removal: CommentRemoval,
+    pub signatures_filter: Option<String>,
+}
+
+#[derive(Default)]
 pub struct AppState {
     pub selected_directory: Option<PathBuf>,
     pub root_node: Option<stitch::core::Node>,
@@ -25,7 +75,7 @@ pub struct AppState {
     pub exclude_files: HashSet<String>,
     pub copy_toast_timer: slint::Timer,
     pub select_dialog: Option<crate::ui::SelectFromTextDialog>,
-    pub fs_dirty: bool,
+    pub fs: FsState,
     pub watcher: Option<notify::RecommendedWatcher>,
     pub fs_event_rx: Option<std::sync::mpsc::Receiver<notify::Result<notify::Event>>>,
     pub fs_pump_timer: slint::Timer,
@@ -41,21 +91,13 @@ pub struct AppState {
 
     pub workspace_baseline: Option<stitch::core::WorkspaceSettings>,
 
-    pub is_generating: bool,
-    pub regen_after: bool,
+    pub generation: GenerationState,
     pub gen_seq: u64,
     pub gen_result_tx: Option<mpsc::Sender<(u64, String)>>,
     pub gen_result_rx: Option<mpsc::Receiver<(u64, String)>>,
     pub gen_pump_timer: slint::Timer,
-    pub disable_fs_watcher: bool,
-    pub disable_notes_section: bool,
-
     // Rust-specific filters and detection
-    pub has_rust_files: bool,
-    pub rust_remove_inline_comments: bool,
-    pub rust_remove_doc_comments: bool,
-    pub rust_function_signatures_only: bool,
-    pub rust_signatures_only_filter: String,
+    pub rust_ui: RustUiState,
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;

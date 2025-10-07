@@ -13,7 +13,7 @@ fn exclude_extension_is_case_insensitive() {
     fs::write(root.join("C.md"), "x").unwrap();
 
     let include = HashSet::new();
-    let exclude_exts: HashSet<String> = [".txt".into()].into_iter().collect();
+    let exclude_exts: HashSet<String> = std::iter::once(String::from(".txt")).collect();
     let exclude_dirs = HashSet::new();
     let exclude_files = HashSet::new();
 

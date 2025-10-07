@@ -31,8 +31,8 @@ fn test_scan_dir_include_exclude() {
     mkfile(&root.join("sub/keep.md"));
 
     let include: HashSet<String> = HashSet::new();
-    let exclude_exts: HashSet<String> = [".lock".into()].into_iter().collect();
-    let exclude_dirs: HashSet<String> = ["node_modules".into()].into_iter().collect();
+    let exclude_exts: HashSet<String> = std::iter::once(String::from(".lock")).collect();
+    let exclude_dirs: HashSet<String> = std::iter::once(String::from("node_modules")).collect();
     let exclude_files: HashSet<String> = HashSet::new();
 
     let tree = scan_dir_to_node(root, &include, &exclude_exts, &exclude_dirs, &exclude_files);
@@ -60,7 +60,7 @@ fn test_scan_dir_with_include_exts_hides_empty_dirs() {
     mkfile(&root.join("sub2/two.md"));
 
     // Only include .rs files -> both sub1 and sub2 should be hidden (no .rs underneath)
-    let include: HashSet<String> = [".rs".into()].into_iter().collect();
+    let include: HashSet<String> = std::iter::once(String::from(".rs")).collect();
     let exclude: HashSet<String> = HashSet::new();
     let nodirs: HashSet<String> = HashSet::new();
     let nofiles: HashSet<String> = HashSet::new();
