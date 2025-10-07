@@ -3,6 +3,16 @@
 set shell := ["bash", "-euo", "pipefail", "-c"]
 set windows-shell := ["bash", "-euo", "pipefail", "-c"]
 
+test:
+	cargo test --workspace --all-targets --all-features
+	
+lint:
+  cargo clippy --workspace --all-targets --all-features -- \
+    -W clippy::all -W clippy::cargo -W clippy::pedantic -W clippy::nursery -A clippy::multiple-crate-versions -D warnings
+
+fmt:
+	cargo fmt --all
+
 # Build the UI app in release mode.
 # Optional: pass TARGET=triple to cross-compile (e.g., x86_64-unknown-linux-musl)
 bin-release:
