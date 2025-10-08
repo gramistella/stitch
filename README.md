@@ -19,6 +19,9 @@ Stitch is a lightweight desktop utility that lets you **select a precise slice o
   - Exclude by extension (leading `-`): `-.lock,-.png`
   - Include takes precedence over exclude when both are present.
   - Dotfiles are visible by default.
+- **Language-specific filters** (appear dynamically when relevant files are detected)
+  - **Rust**: Remove inline comments (`//`, `/* */`), doc comments (`///`, `//!`, `/** */`), extract function signatures only with wildcard filtering
+  - **Slint**: Remove line comments (`//`), block comments (`/* */`)
 - **Two “only” modes**
   - **Hierarchy Only** – just the tree
   - **Directories Only** – only directory names (no file contents)
@@ -172,6 +175,10 @@ Stitch is great for **team workflows**—you can standardize “what to share”
 
 ## 🧽 Scrubbing & Cleanup
 
+Stitch provides both language-specific filters (for Rust and Slint files) and generic text-based scrubbing tools. Language-specific filters are applied first, followed by generic text processing.
+
+### Generic Text Scrubbing
+
 - **Remove lines starting with:** comma-separated prefixes (e.g., `#, //, --`).
   - Full-line comments are removed (leading whitespace allowed).
   - **Inline** comments are removed only when **immediately preceded by whitespace** (incl. Unicode spaces & tabs).
@@ -179,7 +186,42 @@ Stitch is great for **team workflows**—you can standardize “what to share”
 - **Remove regex:** your pattern is compiled as `(?ms)<your-pattern>` (multi-line + dot-matches-newline).
   - You may quote it with single/double or triple quotes; Stitch will strip the quotes before compiling.
 
-> ⚠️ Scrubbing is text-only; it doesn’t parse language syntax. Double-check semantics before pasting back into a compiler.
+### Processing Order
+
+1. **Language-specific filters** (Rust/Slint) - when applicable files are detected
+2. **Generic text scrubbing** (prefix removal, regex removal)
+3. **Output formatting** (hierarchy generation, content assembly)
+
+> ⚠️ Generic scrubbing is text-only; it doesn't parse language syntax. Language-specific filters use proper parsing for accurate results. Double-check semantics before pasting back into a compiler.
+
+---
+
+## 🔧 Language-Specific Filters
+
+Stitch includes intelligent language-specific filters that appear dynamically in the UI when relevant file types are detected in your selection. These filters complement the generic scrubbing tools and are applied before text-based processing.
+
+### Rust Filters (`.rs` files)
+
+When Rust files are present, you'll see a **Rust-specific filters** section with these options:
+
+- **Remove inline regular comments**: Strips `//` and `/* */` comments while preserving content inside strings and raw strings
+- **Remove doc comments**: Removes documentation comments (`///`, `//!`, `/** */`)
+- **Function signatures only**: Extracts only function signatures, replacing function bodies with `{ ... }`
+  - **Signature-only files/folders**: Optional wildcard filter (e.g., `src/*,tests/*,main.rs`) to apply signature-only mode to specific paths
+  - Uses `syn` parsing for accurate AST-based processing with textual fallback
+
+The Rust filters use proper parsing to avoid removing comments inside string literals, raw strings (`r#"..."#`), and other protected regions.
+
+### Slint Filters (`.slint` files)
+
+When Slint UI files are present, you'll see a **Slint-specific filters** section with:
+
+- **Remove single-line comments**: Strips `//` comments
+- **Remove multi-line comments**: Removes `/* */` block comments
+
+Slint filters preserve content inside string literals and handle the language's specific comment syntax.
+
+> **Note**: Language-specific filter sections only appear when the corresponding file types (`.rs` or `.slint`) are detected in your current selection. This keeps the UI clean when working with other languages.
 
 ---
 
@@ -194,7 +236,11 @@ Stitch is great for **team workflows**—you can standardize “what to share”
 
 ## 🔬 Implementation notes
 
-- **Tech**: Rust 2024 edition, Slint, `rfd`, `notify`, `regex`, `chrono`, `serde`/`serde_json`, `dunce`, `arboard`.
+- **Tech**: Rust 2024 edition, Slint, `rfd`, `notify`, `regex`, `chrono`, `serde`/`serde_json`, `dunce`, `arboard`, `syn`, `quote`.
+- **Language-specific processing**:
+  - Rust filters use `syn` for AST-based parsing with textual fallback for malformed code
+  - Slint filters use custom state machine parsing to handle comment syntax
+  - Language filter UI sections appear dynamically based on detected file types in the current selection
 - **Auto refresh**:
   - Event-driven (`notify`) pump that filters out irrelevant changes (e.g., excluded dirs/files).
   - A lightweight periodic check is also in place.
@@ -204,7 +250,6 @@ Stitch is great for **team workflows**—you can standardize “what to share”
   - For very large outputs (>16 MB) or without `tokens`, it falls back to a cheap approximation.
 - **Extension matching semantics**:
   - Case-insensitive (`.TXT` matches `.txt`).
-  - “Include” mode shows only files whose **last** extension segment matches (so `archive.tar.gz` is treated as `.gz`).
 
 ---
 
