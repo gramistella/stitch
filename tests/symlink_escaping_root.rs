@@ -116,7 +116,12 @@ mod unix_symlink_escaping {
         let tree = scan_dir_to_node(root, &include, &exclude_exts, &exclude_dirs, &exclude_files);
 
         // Should include the symlink but not follow it
-        assert!(tree.children.iter().map(|n| n.name.as_str()).any(|x| x == "absolute_link"));
+        assert!(
+            tree.children
+                .iter()
+                .map(|n| n.name.as_str())
+                .any(|x| x == "absolute_link")
+        );
 
         let link_node = tree
             .children

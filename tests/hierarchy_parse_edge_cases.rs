@@ -304,8 +304,6 @@ root
     assert!(parsed.contains("folder.with.dots"));
     // Special characters might be handled differently
     if !parsed.contains("file@with#special$chars.txt") {
-        println!(
-            "Special characters not found in parsed result: {parsed:?}"
-        );
+        println!("Special characters not found in parsed result: {parsed:?}");
     }
 }

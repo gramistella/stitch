@@ -17,7 +17,6 @@ fn collect_paths(node: &stitch::core::Node, prefix: &str, paths: &mut Vec<String
     }
 }
 
-
 #[test]
 fn include_mode_hides_intermediate_dirs_with_no_matching_descendants() {
     let tmp = TempDir::new().unwrap();

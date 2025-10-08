@@ -163,9 +163,7 @@ fn path_to_unix_handles_windows_paths() {
     // Should convert backslashes to forward slashes
     // Note: On Unix systems, this might not convert as expected
     if unix_path.contains('\\') {
-        println!(
-            "Warning: path_to_unix didn't convert backslashes: {unix_path}"
-        );
+        println!("Warning: path_to_unix didn't convert backslashes: {unix_path}");
     }
     // Just ensure it doesn't panic
 }
@@ -177,9 +175,7 @@ fn path_to_unix_handles_mixed_separators() {
     // Should normalize all separators to forward slashes
     // Note: On Unix systems, this might not convert as expected
     if unix_path.contains('\\') {
-        println!(
-            "Warning: path_to_unix didn't convert backslashes: {unix_path}"
-        );
+        println!("Warning: path_to_unix didn't convert backslashes: {unix_path}");
     }
     // Just ensure it doesn't panic and contains forward slashes
     assert!(unix_path.contains('/'));
