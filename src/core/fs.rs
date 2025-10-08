@@ -1,6 +1,7 @@
 use crate::core::Node;
 use std::{
     collections::{HashMap, HashSet},
+    ffi::OsString,
     fs,
     path::{Component, Path, PathBuf},
 };
@@ -12,71 +13,128 @@ type NamePath = (String, PathBuf);
 #[must_use]
 pub fn path_to_unix(p: &Path) -> String {
     let mut s = String::new();
-    for (i, comp) in p.iter().enumerate() {
-        if i > 0 {
+    let mut first = true;
+
+    for comp in p {
+        if !first {
             s.push('/');
         }
-        s.push_str(&comp.to_string_lossy());
+        first = false;
+
+        let comp_str = comp.to_string_lossy();
+
+        // Handle UNC paths on Windows
+        #[cfg(windows)]
+        if comp_str == "\\" && s.is_empty() {
+            // This is the root of a UNC path, skip it as we'll handle it specially
+            continue;
+        }
+
+        s.push_str(&comp_str);
     }
+
+    // Handle UNC paths on Windows - convert \\server\share to //server/share
+    #[cfg(windows)]
+    if let Some(path_str) = p.to_str() {
+        if path_str.starts_with(r"\\") && !path_str.starts_with(r"\\?") {
+            // This is a UNC path, convert it properly
+            let unix_unc = path_str.replace('\\', "/");
+            return unix_unc;
+        }
+    }
+
     s
 }
 
 #[must_use]
 pub fn is_ancestor_of(ancestor: &Path, p: &Path) -> bool {
-    let anc = normalize_path(ancestor);
-    let pp = normalize_path(p);
-    pp.starts_with(&anc)
+    // Try to canonicalize both paths first
+    let anc_canon = dunce::canonicalize(ancestor).unwrap_or_else(|_| normalize_path(ancestor));
+    let pp_canon = dunce::canonicalize(p).unwrap_or_else(|_| {
+        // If we can't canonicalize the full path, try to canonicalize the parent
+        if let Some(parent) = p.parent()
+            && let Ok(parent_canon) = dunce::canonicalize(parent)
+            && let Some(file_name) = p.file_name()
+        {
+            return parent_canon.join(file_name);
+        }
+        normalize_path(p)
+    });
+
+    pp_canon.starts_with(&anc_canon)
 }
 
 #[must_use]
 pub fn normalize_path(p: &Path) -> PathBuf {
+    if p.as_os_str().is_empty() {
+        return PathBuf::new();
+    }
+
     if let Ok(c) = dunce::canonicalize(p) {
         return c;
     }
 
-    let cwd = std::env::current_dir()
-        .ok()
-        .and_then(|cd| dunce::canonicalize(cd).ok())
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let abs = if p.is_absolute() {
-        p.to_path_buf()
-    } else {
-        cwd.join(p)
-    };
+    let mut prefix: Option<OsString> = None;
+    let mut has_root = false;
+    let mut parts: Vec<OsString> = Vec::new();
 
-    let mut cur = abs.as_path();
-    let mut tail: Vec<std::ffi::OsString> = Vec::new();
-    while !cur.exists() {
-        match (cur.parent(), cur.file_name()) {
-            (Some(parent), Some(name)) => {
-                tail.push(name.to_os_string());
-                cur = parent;
-            }
-            _ => break,
-        }
-    }
-
-    let mut base = if cur.exists() {
-        dunce::canonicalize(cur).unwrap_or_else(|_| cur.to_path_buf())
-    } else {
-        abs.clone()
-    };
-
-    for c in tail.iter().rev() {
-        base.push(c);
-    }
-
-    let mut cleaned = PathBuf::new();
-    for comp in base.components() {
+    for comp in p.components() {
         match comp {
+            Component::Prefix(pref) => {
+                prefix = Some(pref.as_os_str().to_os_string());
+            }
+            Component::RootDir => {
+                has_root = true;
+            }
             Component::CurDir => {}
             Component::ParentDir => {
-                let _ = cleaned.pop();
+                if let Some(last) = parts.last() {
+                    if last == ".." {
+                        parts.push(OsString::from(".."));
+                    } else {
+                        let _ = parts.pop();
+                    }
+                } else if !has_root && prefix.is_none() {
+                    parts.push(OsString::from(".."));
+                }
             }
-            _ => cleaned.push(comp.as_os_str()),
+            Component::Normal(name) => {
+                parts.push(name.to_os_string());
+            }
         }
     }
-    cleaned
+
+    let mut result = String::new();
+
+    if let Some(pref) = prefix {
+        let pref_str = pref.to_string_lossy().replace('\\', "/");
+        result.push_str(&pref_str);
+        if has_root && !pref_str.ends_with('/') {
+            result.push('/');
+        }
+    } else if has_root {
+        result.push('/');
+    }
+
+    for (idx, part) in parts.iter().enumerate() {
+        let needs_sep = !(result.is_empty()
+            || result.ends_with('/')
+            || result.ends_with(':')
+            || (result.starts_with("//") && idx == 0));
+        if needs_sep {
+            result.push('/');
+        }
+        if result.ends_with(':') {
+            result.push('/');
+        }
+        result.push_str(&part.to_string_lossy().replace('\\', "/"));
+    }
+
+    if result.is_empty() {
+        PathBuf::new()
+    } else {
+        PathBuf::from(result)
+    }
 }
 
 /// Check if a path matches any extension in the given filter set.

@@ -2,6 +2,7 @@
 #[test]
 fn windows_junctions_behavior() {
     use std::os::windows::fs::symlink_dir;
+    use tempfile::TempDir;
 
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
