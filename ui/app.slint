@@ -250,6 +250,11 @@ component ProfilesPanel inherits VerticalBox {
     in-out property <bool> rust-function-signatures-only;
     in-out property <string> rust-signatures-only-filter;
 
+    // Slint-specific filters
+    in-out property <bool> show-slint-section;
+    in-out property <bool> slint-remove-line-comments;
+    in-out property <bool> slint-remove-block-comments;
+
     // Notifications upward
     callback select-profile(index: int);
     callback save-profile();
@@ -421,6 +426,23 @@ component ProfilesPanel inherits VerticalBox {
                     changed => { root.filter-changed(); }
                 }
 
+                // Slint-specific filters section
+                if (root.show-slint-section) : Rectangle { width: parent.width; height: 12px; }
+                if (root.show-slint-section) : Rectangle { width: parent.width; height: 1px; background: Palette.border; }
+                if (root.show-slint-section) : Text { width: parent.width; text: "Slint-specific filters"; font-weight: 10; }
+                if (root.show-slint-section) : CheckBox {
+                    width: parent.width;
+                    text: "Remove single-line comments (//)";
+                    checked <=> root.slint-remove-line-comments;
+                    toggled => { root.filter-changed(); }
+                }
+                if (root.show-slint-section) : CheckBox {
+                    width: parent.width;
+                    text: "Remove multi-line comments (/* */)";
+                    checked <=> root.slint-remove-block-comments;
+                    toggled => { root.filter-changed(); }
+                }
+
                 // Bottom spacer (Must always be last)
                 Rectangle { width: parent.width; height: 12px; }
             }
@@ -522,6 +544,10 @@ component OutputPanel inherits VerticalBox {
     }
 }
 
+/*
+    Main App Window
+*/
+
 export component AppWindow inherits Window {
     width: 1300px;
     height: 650px;
@@ -546,6 +572,10 @@ export component AppWindow inherits Window {
     in-out property <bool> rust-remove-doc-comments;
     in-out property <bool> rust-function-signatures-only;
     in-out property <string> rust-signatures-only-filter;
+    // Slint-specific filters
+    in-out property <bool> show-slint-section;
+    in-out property <bool> slint-remove-line-comments;
+    in-out property <bool> slint-remove-block-comments;
     in-out property <bool> hierarchy-only;
     in-out property <bool> dirs-only;
     in-out property <bool> disable-fs-watcher;
@@ -623,6 +653,11 @@ export component AppWindow inherits Window {
                 rust-remove-doc-comments <=> root.rust-remove-doc-comments;
                 rust-function-signatures-only <=> root.rust-function-signatures-only;
                 rust-signatures-only-filter <=> root.rust-signatures-only-filter;
+
+                // Slint bindings
+                show-slint-section <=> root.show-slint-section;
+                slint-remove-line-comments <=> root.slint-remove-line-comments;
+                slint-remove-block-comments <=> root.slint-remove-block-comments;
 
                 select-profile(index) => { root.select-profile(index); }
                 save-profile => { root.save-profile(); }

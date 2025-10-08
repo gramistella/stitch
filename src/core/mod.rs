@@ -12,10 +12,12 @@ pub struct Node {
 
 mod fs;
 mod rust_filters;
+mod slint_filters;
 mod text;
 mod workspace;
 
 pub use fs::*;
 pub use rust_filters::*;
+pub use slint_filters::*;
 pub use text::*;
 pub use workspace::*;

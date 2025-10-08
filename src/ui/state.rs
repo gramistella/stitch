@@ -59,6 +59,13 @@ pub struct RustUiState {
 }
 
 #[derive(Default)]
+pub struct SlintUiState {
+    pub has_files: bool,
+    pub remove_line_comments: bool,
+    pub remove_block_comments: bool,
+}
+
+#[derive(Default)]
 pub struct AppState {
     pub selected_directory: Option<PathBuf>,
     pub root_node: Option<stitch::core::Node>,
@@ -100,6 +107,8 @@ pub struct AppState {
     pub gen_pump_timer: slint::Timer,
     // Rust-specific filters and detection
     pub rust_ui: RustUiState,
+    // Slint-specific filters and detection
+    pub slint_ui: SlintUiState,
 }
 
 pub type SharedState = Rc<RefCell<AppState>>;

@@ -14,10 +14,10 @@ use std::sync::mpsc;
 
 use stitch::core::{
     Node, Profile, ProfileScope, RustFilterOptions, RustOptions, WorkspaceSettings,
-    apply_rust_filters, clean_remove_regex, collapse_consecutive_blank_lines,
+    apply_rust_filters, apply_slint_filters, clean_remove_regex, collapse_consecutive_blank_lines,
     collect_selected_paths, compile_remove_regex_opt, delete_profile, ensure_profiles_dirs,
-    ensure_workspace_dir, gather_paths_set, is_ancestor_of, is_rust_file_path, list_profiles,
-    load_local_settings, load_profile, load_workspace, parse_extension_filters,
+    ensure_workspace_dir, gather_paths_set, is_ancestor_of, is_rust_file_path, is_slint_file_path,
+    list_profiles, load_local_settings, load_profile, load_workspace, parse_extension_filters,
     parse_hierarchy_text, path_to_unix, render_unicode_tree_from_paths, save_local_settings,
     save_profile, save_workspace, scan_dir_to_node_with_stats, signatures_filter_matches,
     split_prefix_list,
@@ -70,6 +70,7 @@ struct GenerationJob {
     remove_regex: Option<regex::Regex>,
     rust_opts: RustFilterOptions,
     rust_sig_filter: String,
+    slint_opts: stitch::core::SlintFilterOptions,
     tx: mpsc::Sender<(u64, String)>,
     seq: u64,
 }
@@ -85,6 +86,8 @@ struct NotesContext {
     remove_regex: Option<String>,
     comment_removal: CommentRemoval,
     signatures_filter: Option<String>,
+    slint_remove_line_comments: bool,
+    slint_remove_block_comments: bool,
 }
 
 struct SelectedPresence {
@@ -535,7 +538,7 @@ fn build_generation_job(
         ..
     } = selection;
 
-    let (remove_prefixes, remove_regex, rust_opts, rust_sig_filter) = {
+    let (remove_prefixes, remove_regex, rust_opts, rust_sig_filter, slint_opts) = {
         let s = state.borrow();
         let comment = s.rust_ui.comment_removal;
         let opts = RustFilterOptions {
@@ -544,11 +547,16 @@ fn build_generation_job(
             function_signatures_only: s.rust_ui.signatures_filter.is_some(),
         };
         let filter = s.rust_ui.signatures_filter.clone().unwrap_or_default();
+        let slint_opts = stitch::core::SlintFilterOptions {
+            remove_line_comments: s.slint_ui.remove_line_comments,
+            remove_block_comments: s.slint_ui.remove_block_comments,
+        };
         (
             s.remove_prefixes.clone(),
             s.remove_regex.clone(),
             opts,
             filter,
+            slint_opts,
         )
     };
 
@@ -575,6 +583,7 @@ fn build_generation_job(
         remove_regex,
         rust_opts,
         rust_sig_filter,
+        slint_opts,
         tx,
         seq,
     }
@@ -595,6 +604,7 @@ fn run_generation_job(job: GenerationJob) {
         remove_regex,
         rust_opts,
         rust_sig_filter,
+        slint_opts,
         tx,
         seq,
     } = job;
@@ -638,6 +648,8 @@ fn run_generation_job(job: GenerationJob) {
                 eff.function_signatures_only = false;
             }
             contents = apply_rust_filters(&contents, &eff);
+        } else if is_slint_file_path(&fp) {
+            contents = apply_slint_filters(&contents, &slint_opts);
         }
 
         let rel_display = rel.to_string_lossy().into_owned();
@@ -774,6 +786,17 @@ fn note_rust_settings(ctx: &NotesContext, selected: &SelectedPresence) -> Vec<St
     lines
 }
 
+fn note_slint_settings(ctx: &NotesContext, _selected: &SelectedPresence) -> Vec<String> {
+    let mut lines = Vec::new();
+    if ctx.slint_remove_line_comments {
+        lines.push("Removed Slint single-line comments (//)".to_string());
+    }
+    if ctx.slint_remove_block_comments {
+        lines.push("Removed Slint multi-line comments (/* */)".to_string());
+    }
+    lines
+}
+
 fn build_notes_section(
     state: &SharedState,
     _project_root: &std::path::Path,
@@ -814,6 +837,8 @@ fn build_notes_section(
             remove_regex: s.remove_regex_str.clone(),
             comment_removal: s.rust_ui.comment_removal,
             signatures_filter: s.rust_ui.signatures_filter.clone(),
+            slint_remove_line_comments: s.slint_ui.remove_line_comments,
+            slint_remove_block_comments: s.slint_ui.remove_block_comments,
         }
     };
 
@@ -829,6 +854,7 @@ fn build_notes_section(
     lines.extend(note_extension_filters(&ctx, &selected));
     lines.extend(note_remove_settings(&ctx));
     lines.extend(note_rust_settings(&ctx, &selected));
+    lines.extend(note_slint_settings(&ctx, &selected));
 
     lines.join("\n")
 }
@@ -936,6 +962,33 @@ pub fn rebuild_tree_and_ui(app: &AppWindow, state: &SharedState) {
         let mut s = state.borrow_mut();
         s.rust_ui.has_files = has_rs;
     }
+
+    // Detect presence of any .slint file to toggle Slint section visibility
+    let has_slint = {
+        let s = state.borrow();
+        let mut any = false;
+        if let Some(root) = &s.root_node {
+            fn rec(n: &Node, any: &mut bool) {
+                if *any {
+                    return;
+                }
+                if !n.is_dir && n.path.extension().and_then(|e| e.to_str()) == Some("slint") {
+                    *any = true;
+                    return;
+                }
+                for c in &n.children {
+                    rec(c, any);
+                }
+            }
+            rec(root, &mut any);
+        }
+        any
+    };
+    app.set_show_slint_section(has_slint);
+    {
+        let mut s = state.borrow_mut();
+        s.slint_ui.has_files = has_slint;
+    }
 }
 
 fn refresh_flat_model(app: &AppWindow, state: &SharedState) {
@@ -992,6 +1045,9 @@ fn parse_filters_from_ui(app: &AppWindow, state: &SharedState) {
         } else {
             None
         };
+        // Slint toggles
+        st.slint_ui.remove_line_comments = app.get_slint_remove_line_comments();
+        st.slint_ui.remove_block_comments = app.get_slint_remove_block_comments();
     }
 
     let Some(dir) = state.borrow().selected_directory.clone() else {
