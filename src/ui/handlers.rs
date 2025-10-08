@@ -129,6 +129,15 @@ impl SelectedPresence {
         })
     }
 
+    fn has_slint_files(&self) -> bool {
+        self.entries.iter().any(|rel| {
+            std::path::Path::new(rel)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("slint"))
+        })
+    }
+
     fn any_matches_filter(&self, filter: &str) -> bool {
         self.entries
             .iter()
@@ -762,6 +771,9 @@ fn note_remove_settings(ctx: &NotesContext) -> Vec<String> {
 
 fn note_rust_settings(ctx: &NotesContext, selected: &SelectedPresence) -> Vec<String> {
     let mut lines = Vec::new();
+    if !selected.has_rust_files() {
+        return lines;
+    }
     let comment_removal = ctx.comment_removal;
     if comment_removal.removes_inline() {
         lines.push("Removed Rust inline comments (//, /* */)".to_string());
@@ -786,8 +798,11 @@ fn note_rust_settings(ctx: &NotesContext, selected: &SelectedPresence) -> Vec<St
     lines
 }
 
-fn note_slint_settings(ctx: &NotesContext, _selected: &SelectedPresence) -> Vec<String> {
+fn note_slint_settings(ctx: &NotesContext, selected: &SelectedPresence) -> Vec<String> {
     let mut lines = Vec::new();
+    if !selected.has_slint_files() {
+        return lines;
+    }
     if ctx.slint_remove_line_comments {
         lines.push("Removed Slint single-line comments (//)".to_string());
     }
