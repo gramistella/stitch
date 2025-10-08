@@ -1,11 +1,39 @@
 use regex::Regex;
 use std::collections::{BTreeMap, HashSet};
 
+// ============================== Unicode glyphs ===============================
+// Box-drawing characters used for tree parsing/rendering
+pub const GLYPH_VERT: char = '│';
+pub const GLYPH_END: char = '└';
+pub const GLYPH_TEE: char = '├';
+pub const GLYPH_HORI: char = '─';
+pub const GLYPH_BRANCH_END: &str = "└── ";
+pub const GLYPH_BRANCH_TEE: &str = "├── ";
+pub const GLYPH_VERT_PREFIX: &str = "│   ";
+pub const GLYPH_INDENT: &str = "    ";
+
+// Common UI glyphs shared by multiple components
+pub const GLYPH_BULLET: &str = "•";
+pub const GLYPH_ELLIPSIS: &str = "…";
+pub const GLYPH_HOURGLASS: &str = "⏳";
+
+// No encoding repair needed for hierarchy or file contents when read correctly as UTF-8.
+#[inline]
+fn normalize_mojibake_tree_input(input: &str) -> String {
+    input.to_string()
+}
+
+#[must_use]
+pub fn repair_mojibake_if_present(input: &str) -> String {
+    input.to_string()
+}
+
 /* =========================== Parsing & Text utils =========================== */
 
 #[must_use]
 pub fn parse_hierarchy_text(text: &str) -> Option<HashSet<String>> {
-    let mut lines = text.lines();
+    let normalized_input = normalize_mojibake_tree_input(text);
+    let mut lines = normalized_input.lines();
     let _root = lines.next()?;
 
     let mut paths: HashSet<String> = HashSet::new();
@@ -22,7 +50,12 @@ pub fn parse_hierarchy_text(text: &str) -> Option<HashSet<String>> {
         let mut byte_pos: usize = 0;
 
         for (i, ch) in line.chars().enumerate() {
-            if ch != '│' && ch != '└' && ch != '├' && ch != '─' && !ch.is_whitespace() {
+            if ch != GLYPH_VERT
+                && ch != GLYPH_END
+                && ch != GLYPH_TEE
+                && ch != GLYPH_HORI
+                && !ch.is_whitespace()
+            {
                 name_char_idx = Some(i);
                 name_byte_idx = byte_pos;
                 break;
@@ -84,13 +117,21 @@ pub fn render_unicode_tree_from_paths(paths: &[String], root_name: Option<&str>)
         for (idx, (name, child)) in node.children.iter().enumerate() {
             let last = idx + 1 == len;
             out.push_str(prefix);
-            out.push_str(if last { "└── " } else { "├── " });
+            out.push_str(if last {
+                GLYPH_BRANCH_END
+            } else {
+                GLYPH_BRANCH_TEE
+            });
             out.push_str(name);
             out.push('\n');
 
             if !child.children.is_empty() {
                 let saved = prefix.len();
-                prefix.push_str(if last { "    " } else { "│   " });
+                prefix.push_str(if last {
+                    GLYPH_INDENT
+                } else {
+                    GLYPH_VERT_PREFIX
+                });
                 render(child, prefix, out);
                 prefix.truncate(saved);
             }

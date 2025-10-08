@@ -356,7 +356,14 @@ fn handle_generation_in_progress(app: &AppWindow, state: &SharedState) -> bool {
     let mut s = state.borrow_mut();
     if s.generation.in_progress {
         s.generation.queue_another = true;
-        app.set_output_text("⏳ Generating… (queued)".into());
+        app.set_output_text(
+            format!(
+                "{} Generating{} (queued)",
+                stitch::core::GLYPH_HOURGLASS,
+                stitch::core::GLYPH_ELLIPSIS
+            )
+            .into(),
+        );
         app.set_output_stats("".into());
         return true;
     }
@@ -453,7 +460,14 @@ fn prepare_async_generation(
     selection: SelectionSnapshot,
     header: String,
 ) {
-    app.set_output_text("⏳ Generating…".into());
+    app.set_output_text(
+        format!(
+            "{} Generating{}",
+            stitch::core::GLYPH_HOURGLASS,
+            stitch::core::GLYPH_ELLIPSIS
+        )
+        .into(),
+    );
     app.set_output_stats("".into());
 
     ensure_generation_channel(app, state);
@@ -478,6 +492,7 @@ fn ensure_generation_channel(app: &AppWindow, state: &SharedState) {
         std::time::Duration::from_millis(120),
         move || {
             if let (Some(app), Some(out)) = (app_weak.upgrade(), drain_latest_result(&state_rc)) {
+                #[allow(clippy::print_stdout)]
                 set_output(&app, &state_rc, &out);
                 update_last_refresh(&app);
 
@@ -601,6 +616,8 @@ fn run_generation_job(job: GenerationJob) {
             }
         };
 
+        // Simple debug: show hex bytes of key lines right after read
+        #[allow(clippy::print_stdout)]
         if !remove_prefixes.is_empty() {
             contents = stitch::core::strip_lines_and_inline_comments(&contents, &remove_prefixes);
         }
@@ -1095,7 +1112,6 @@ fn set_tree_model(app: &AppWindow, rows: Vec<Row>) {
 
 fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
     let normalized = collapse_consecutive_blank_lines(s);
-
     {
         let mut st = state.borrow_mut();
         st.full_output_text.clone_from(&normalized);
@@ -1117,7 +1133,13 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
 
     #[cfg(feature = "tokens")]
     {
-        app.set_output_stats(format!("{total_chars} chars • … tokens • {total_lines} LOC").into());
+        app.set_output_stats(
+            format!(
+                "{total_chars} chars • {} tokens • {total_lines} LOC",
+                stitch::core::GLYPH_ELLIPSIS
+            )
+            .into(),
+        );
         let text = normalized.clone();
         let app_weak = app.as_weak();
 
@@ -1177,6 +1199,8 @@ fn set_output(app: &AppWindow, state: &SharedState, s: &str) {
         head
     };
 
+    // Simple debug: show hex bytes of a representative line just before display
+    #[allow(clippy::print_stdout)]
     app.set_output_text(displayed.into());
 }
 

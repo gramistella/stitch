@@ -538,6 +538,7 @@ enum CommentState {
 }
 
 struct CommentRemover<'a> {
+    src: &'a str,
     bytes: &'a [u8],
     len: usize,
     index: usize,
@@ -550,6 +551,7 @@ struct CommentRemover<'a> {
 impl<'a> CommentRemover<'a> {
     fn new(input: &'a str, remove_inline: bool, remove_doc: bool) -> Self {
         Self {
+            src: input,
             bytes: input.as_bytes(),
             len: input.len(),
             index: 0,
@@ -597,8 +599,10 @@ impl<'a> CommentRemover<'a> {
         if self.bytes[self.index] == b'r' && self.try_enter_raw_string() {
             return;
         }
-        self.output.push(self.bytes[self.index] as char);
-        self.index += 1;
+        // Copy the next Unicode scalar intact from the original source
+        let ch = self.src[self.index..].chars().next().unwrap_or('\u{FFFD}');
+        self.output.push(ch);
+        self.index += ch.len_utf8();
     }
 
     fn starts_line_comment(&self) -> bool {
@@ -633,9 +637,13 @@ impl<'a> CommentRemover<'a> {
             self.index = cursor;
             return;
         }
-        while self.index < self.len && self.bytes[self.index] != b'\n' {
-            self.output.push(self.bytes[self.index] as char);
-            self.index += 1;
+        while self.index < self.len {
+            let ch = self.src[self.index..].chars().next().unwrap_or('\u{FFFD}');
+            if ch == '\n' {
+                break;
+            }
+            self.output.push(ch);
+            self.index += ch.len_utf8();
         }
         if self.index < self.len {
             self.output.push('\n');
@@ -692,10 +700,13 @@ impl<'a> CommentRemover<'a> {
                 }
                 continue;
             }
-            if !remove {
-                self.output.push(self.bytes[self.index] as char);
+            if remove {
+                self.index += 1;
+            } else {
+                let ch = self.src[self.index..].chars().next().unwrap_or('\u{FFFD}');
+                self.output.push(ch);
+                self.index += ch.len_utf8();
             }
-            self.index += 1;
         }
         self.state = CommentState::Block {
             remove,
@@ -708,14 +719,14 @@ impl<'a> CommentRemover<'a> {
             self.state = CommentState::Code;
             return;
         }
-        let current = self.bytes[self.index];
-        self.output.push(current as char);
-        self.index += 1;
-        if !escaped && current == quote {
+        let ch = self.src[self.index..].chars().next().unwrap_or('\u{FFFD}');
+        self.output.push(ch);
+        self.index += ch.len_utf8();
+        if !escaped && (ch as u32) == u32::from(quote) {
             self.state = CommentState::Code;
             return;
         }
-        let next_escaped = current == b'\\' && !escaped;
+        let next_escaped = ch == '\\' && !escaped;
         self.state = if quote == b'"' {
             CommentState::Dq {
                 escaped: next_escaped,
@@ -731,9 +742,9 @@ impl<'a> CommentRemover<'a> {
         if self.index >= self.len {
             return;
         }
-        let current = self.bytes[self.index];
-        self.output.push(current as char);
-        if current == b'"' {
+        let ch = self.src[self.index..].chars().next().unwrap_or('\u{FFFD}');
+        self.output.push(ch);
+        if ch == '"' {
             let mut lookahead = self.index + 1;
             let mut matched = 0usize;
             while matched < hashes && lookahead < self.len && self.bytes[lookahead] == b'#' {
@@ -752,7 +763,7 @@ impl<'a> CommentRemover<'a> {
                 return;
             }
         }
-        self.index += 1;
+        self.index += ch.len_utf8();
     }
 
     fn try_enter_raw_string(&mut self) -> bool {
