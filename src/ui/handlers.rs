@@ -1634,6 +1634,12 @@ pub fn on_select_profile(app: &AppWindow, state: &SharedState, index: i32) {
             app.set_remove_regex(ws.remove_regex.clone().into());
             app.set_hierarchy_only(ws.hierarchy_only);
             app.set_dirs_only(ws.dirs_only);
+            app.set_rust_remove_inline_comments(ws.rust.rust_remove_inline_comments);
+            app.set_rust_remove_doc_comments(ws.rust.rust_remove_doc_comments);
+            app.set_rust_function_signatures_only(ws.rust.rust_function_signatures_only);
+            app.set_rust_signatures_only_filter(ws.rust.rust_signatures_only_filter.clone().into());
+            app.set_slint_remove_line_comments(ws.slint.slint_remove_line_comments);
+            app.set_slint_remove_block_comments(ws.slint.slint_remove_block_comments);
 
             state.borrow_mut().workspace_baseline = Some(ws);
 
@@ -1967,6 +1973,12 @@ pub fn on_delete_profile(app: &AppWindow, state: &SharedState) {
         app.set_remove_regex(ws.remove_regex.clone().into());
         app.set_hierarchy_only(ws.hierarchy_only);
         app.set_dirs_only(ws.dirs_only);
+        app.set_rust_remove_inline_comments(ws.rust.rust_remove_inline_comments);
+        app.set_rust_remove_doc_comments(ws.rust.rust_remove_doc_comments);
+        app.set_rust_function_signatures_only(ws.rust.rust_function_signatures_only);
+        app.set_rust_signatures_only_filter(ws.rust.rust_signatures_only_filter.clone().into());
+        app.set_slint_remove_line_comments(ws.slint.slint_remove_line_comments);
+        app.set_slint_remove_block_comments(ws.slint.slint_remove_block_comments);
 
         // Update baseline
         state.borrow_mut().workspace_baseline = Some(ws);
@@ -2012,6 +2024,12 @@ pub fn on_discard_changes(app: &AppWindow, state: &SharedState) {
             app.set_remove_regex(ws.remove_regex.clone().into());
             app.set_hierarchy_only(ws.hierarchy_only);
             app.set_dirs_only(ws.dirs_only);
+            app.set_rust_remove_inline_comments(ws.rust.rust_remove_inline_comments);
+            app.set_rust_remove_doc_comments(ws.rust.rust_remove_doc_comments);
+            app.set_rust_function_signatures_only(ws.rust.rust_function_signatures_only);
+            app.set_rust_signatures_only_filter(ws.rust.rust_signatures_only_filter.clone().into());
+            app.set_slint_remove_line_comments(ws.slint.slint_remove_line_comments);
+            app.set_slint_remove_block_comments(ws.slint.slint_remove_block_comments);
 
             parse_filters_from_ui(app, state);
 
