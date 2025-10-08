@@ -19,6 +19,8 @@ pub struct WorkspaceSettings {
     pub dirs_only: bool,
     #[serde(flatten)]
     pub rust: RustOptions,
+    #[serde(flatten)]
+    pub slint: SlintOptions,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -31,6 +33,14 @@ pub struct RustOptions {
     pub rust_function_signatures_only: bool,
     #[serde(default)]
     pub rust_signatures_only_filter: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+pub struct SlintOptions {
+    #[serde(default)]
+    pub slint_remove_line_comments: bool,
+    #[serde(default)]
+    pub slint_remove_block_comments: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

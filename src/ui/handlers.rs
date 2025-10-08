@@ -13,7 +13,7 @@ use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use std::sync::mpsc;
 
 use stitch::core::{
-    Node, Profile, ProfileScope, RustFilterOptions, RustOptions, WorkspaceSettings,
+    Node, Profile, ProfileScope, RustFilterOptions, RustOptions, SlintOptions, WorkspaceSettings,
     apply_rust_filters, apply_slint_filters, clean_remove_regex, collapse_consecutive_blank_lines,
     collect_selected_paths, compile_remove_regex_opt, delete_profile, ensure_profiles_dirs,
     ensure_workspace_dir, gather_paths_set, is_ancestor_of, is_rust_file_path, is_slint_file_path,
@@ -209,6 +209,9 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
             app.set_rust_remove_doc_comments(ws.rust.rust_remove_doc_comments);
             app.set_rust_function_signatures_only(ws.rust.rust_function_signatures_only);
             app.set_rust_signatures_only_filter(ws.rust.rust_signatures_only_filter.clone().into());
+            // Slint settings
+            app.set_slint_remove_line_comments(ws.slint.slint_remove_line_comments);
+            app.set_slint_remove_block_comments(ws.slint.slint_remove_block_comments);
 
             state.borrow_mut().workspace_baseline = Some(ws.clone());
         } else {
@@ -226,6 +229,10 @@ pub fn on_select_folder(app: &AppWindow, state: &SharedState) {
                     rust_remove_doc_comments: app.get_rust_remove_doc_comments(),
                     rust_function_signatures_only: app.get_rust_function_signatures_only(),
                     rust_signatures_only_filter: app.get_rust_signatures_only_filter().to_string(),
+                },
+                slint: SlintOptions {
+                    slint_remove_line_comments: app.get_slint_remove_line_comments(),
+                    slint_remove_block_comments: app.get_slint_remove_block_comments(),
                 },
             };
             let _ = save_workspace(&dir, &seed);
@@ -1526,6 +1533,10 @@ fn capture_profile_from_ui(app: &AppWindow, state: &SharedState, name: &str) -> 
             rust_function_signatures_only: app.get_rust_function_signatures_only(),
             rust_signatures_only_filter: app.get_rust_signatures_only_filter().to_string(),
         },
+        slint: SlintOptions {
+            slint_remove_line_comments: app.get_slint_remove_line_comments(),
+            slint_remove_block_comments: app.get_slint_remove_block_comments(),
+        },
     };
 
     // NOTE: Preserve root selection by storing an empty relative path ("")
@@ -1573,6 +1584,8 @@ fn apply_profile_to_ui(app: &AppWindow, state: &SharedState, profile: &Profile) 
             .clone()
             .into(),
     );
+    app.set_slint_remove_line_comments(profile.settings.slint.slint_remove_line_comments);
+    app.set_slint_remove_block_comments(profile.settings.slint.slint_remove_block_comments);
 
     app.set_profile_name(profile.name.clone().into());
 
@@ -1682,6 +1695,10 @@ pub fn on_save_profile_current(app: &AppWindow, state: &SharedState) {
                 rust_remove_doc_comments: app.get_rust_remove_doc_comments(),
                 rust_function_signatures_only: app.get_rust_function_signatures_only(),
                 rust_signatures_only_filter: app.get_rust_signatures_only_filter().to_string(),
+            },
+            slint: SlintOptions {
+                slint_remove_line_comments: app.get_slint_remove_line_comments(),
+                slint_remove_block_comments: app.get_slint_remove_block_comments(),
             },
         };
 
@@ -1839,6 +1856,8 @@ fn profiles_equal(a: &Profile, b: &Profile) -> bool {
         || sa.rust.rust_remove_doc_comments != sb.rust.rust_remove_doc_comments
         || sa.rust.rust_function_signatures_only != sb.rust.rust_function_signatures_only
         || sa.rust.rust_signatures_only_filter != sb.rust.rust_signatures_only_filter
+        || sa.slint.slint_remove_line_comments != sb.slint.slint_remove_line_comments
+        || sa.slint.slint_remove_block_comments != sb.slint.slint_remove_block_comments
     {
         return false;
     }
@@ -1880,6 +1899,10 @@ fn update_save_button_state(app: &AppWindow, state: &SharedState) {
                 rust_remove_doc_comments: app.get_rust_remove_doc_comments(),
                 rust_function_signatures_only: app.get_rust_function_signatures_only(),
                 rust_signatures_only_filter: app.get_rust_signatures_only_filter().to_string(),
+            },
+            slint: SlintOptions {
+                slint_remove_line_comments: app.get_slint_remove_line_comments(),
+                slint_remove_block_comments: app.get_slint_remove_block_comments(),
             },
         };
 
@@ -2043,6 +2066,7 @@ fn workspace_settings_equal(a: &WorkspaceSettings, b: &WorkspaceSettings) -> boo
         && a.hierarchy_only == b.hierarchy_only
         && a.dirs_only == b.dirs_only
         && a.rust == b.rust
+        && a.slint == b.slint
     // Note: we intentionally ignore `current_profile` here for dirtiness comparison
 }
 

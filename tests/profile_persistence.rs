@@ -1,6 +1,7 @@
 use stitch::core::{
-    Profile, ProfileScope, ProfileSelection, RustOptions, WorkspaceSettings, delete_profile,
-    ensure_profiles_dirs, ensure_workspace_dir, list_profiles, load_profile, save_profile,
+    Profile, ProfileScope, ProfileSelection, RustOptions, SlintOptions, WorkspaceSettings,
+    delete_profile, ensure_profiles_dirs, ensure_workspace_dir, list_profiles, load_profile,
+    save_profile,
 };
 use tempfile::TempDir;
 
@@ -35,6 +36,10 @@ fn sample_ws() -> WorkspaceSettings {
             rust_remove_doc_comments: false,
             rust_function_signatures_only: false,
             rust_signatures_only_filter: String::new(),
+        },
+        slint: SlintOptions {
+            slint_remove_line_comments: false,
+            slint_remove_block_comments: false,
         },
     }
 }

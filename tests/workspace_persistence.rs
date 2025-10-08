@@ -1,6 +1,6 @@
 use stitch::core::{
-    RustOptions, WorkspaceSettings, ensure_workspace_dir, load_workspace, save_workspace,
-    workspace_dir, workspace_file,
+    RustOptions, SlintOptions, WorkspaceSettings, ensure_workspace_dir, load_workspace,
+    save_workspace, workspace_dir, workspace_file,
 };
 use tempfile::TempDir;
 
@@ -41,6 +41,10 @@ fn save_then_load_roundtrip_and_overwrite_is_atomic() {
             rust_function_signatures_only: false,
             rust_signatures_only_filter: String::new(),
         },
+        slint: SlintOptions {
+            slint_remove_line_comments: true,
+            slint_remove_block_comments: false,
+        },
     };
     save_workspace(root, &s1).expect("save v1");
 
@@ -68,17 +72,27 @@ fn save_then_load_roundtrip_and_overwrite_is_atomic() {
         loaded1.rust.rust_function_signatures_only,
         s1.rust.rust_function_signatures_only
     );
+    assert_eq!(
+        loaded1.slint.slint_remove_line_comments,
+        s1.slint.slint_remove_line_comments
+    );
+    assert_eq!(
+        loaded1.slint.slint_remove_block_comments,
+        s1.slint.slint_remove_block_comments
+    );
 
     let mut s2 = loaded1;
     s2.ext_filter = ".rs".into();
     s2.hierarchy_only = true;
     s2.rust.rust_signatures_only_filter = "src/*,tests/*".into();
+    s2.slint.slint_remove_block_comments = true;
     save_workspace(root, &s2).expect("save v2 overwrite");
 
     let loaded2 = load_workspace(root).expect("load s2");
     assert_eq!(loaded2.ext_filter, ".rs");
     assert!(loaded2.hierarchy_only);
     assert_eq!(loaded2.rust.rust_signatures_only_filter, "src/*,tests/*");
+    assert!(loaded2.slint.slint_remove_block_comments);
 
     let tmp_path = wf.with_extension("json.tmp");
     assert!(

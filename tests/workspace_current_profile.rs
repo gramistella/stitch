@@ -1,5 +1,5 @@
 use stitch::core::{
-    LocalSettings, Profile, ProfileScope, RustOptions, WorkspaceSettings,
+    LocalSettings, Profile, ProfileScope, RustOptions, SlintOptions, WorkspaceSettings,
     clear_stale_current_profile, load_local_settings, save_local_settings, save_profile,
 };
 use tempfile::TempDir;
@@ -54,6 +54,10 @@ fn no_clear_when_shared_profile_exists() {
                 rust_function_signatures_only: false,
                 rust_signatures_only_filter: String::new(),
             },
+            slint: SlintOptions {
+                slint_remove_line_comments: false,
+                slint_remove_block_comments: false,
+            },
         },
         explicit: vec![],
     };
@@ -92,6 +96,10 @@ fn no_clear_when_local_profile_exists() {
                 rust_remove_doc_comments: false,
                 rust_function_signatures_only: false,
                 rust_signatures_only_filter: String::new(),
+            },
+            slint: SlintOptions {
+                slint_remove_line_comments: false,
+                slint_remove_block_comments: false,
             },
         },
         explicit: vec![],
