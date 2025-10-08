@@ -1,5 +1,3 @@
-#![allow(clippy::needless_return)]
-
 #[cfg(feature = "ui")]
 mod ui;
 
