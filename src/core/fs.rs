@@ -79,28 +79,48 @@ pub fn normalize_path(p: &Path) -> PathBuf {
     cleaned
 }
 
-fn dot_lower_last_ext(p: &Path) -> String {
-    p.extension().map_or_else(String::new, |os| {
-        os.to_str().map_or_else(
-            || {
-                let lossy = os.to_string_lossy();
-                let lower = lossy.to_lowercase();
-                let mut out = String::with_capacity(lower.len() + 1);
-                out.push('.');
-                out.push_str(&lower);
-                out
-            },
-            |s| {
-                let mut out = String::with_capacity(s.len() + 1);
-                out.push('.');
-                for b in s.bytes() {
-                    let lb = if b.is_ascii_uppercase() { b + 32 } else { b };
-                    out.push(lb as char);
-                }
-                out
-            },
-        )
-    })
+/// Check if a path matches any extension in the given filter set.
+/// Supports three types of matching:
+/// 1. Full filename (for extensionless files like "justfile")
+/// 2. Multi-dot extensions (for files like "file.tar.gz")
+/// 3. Single extensions (for files like "file.rs")
+fn path_matches_extension_filters<S: ::std::hash::BuildHasher>(
+    p: &Path,
+    filters: &HashSet<String, S>,
+) -> bool {
+    let filename = p.file_name().and_then(|name| name.to_str()).unwrap_or("");
+
+    if filename.is_empty() {
+        return false;
+    }
+
+    // 1. Try full filename as extension (for extensionless files like "justfile")
+    let full_filename_ext = format!(".{}", filename.to_lowercase());
+    if filters.contains(&full_filename_ext) {
+        return true;
+    }
+
+    // 2. Try multi-dot extensions (for files like "file.tar.gz")
+    let filename_lower = filename.to_lowercase();
+    let mut dot_pos = 0;
+    while let Some(pos) = filename_lower[dot_pos..].find('.') {
+        let actual_pos = dot_pos + pos;
+        let multi_ext = &filename_lower[actual_pos..];
+        if filters.contains(multi_ext) {
+            return true;
+        }
+        dot_pos = actual_pos + 1;
+    }
+
+    // 3. Try single extension (current behavior for files like "file.rs")
+    if let Some(ext) = p.extension().and_then(|e| e.to_str()) {
+        let single_ext = format!(".{}", ext.to_lowercase());
+        if filters.contains(&single_ext) {
+            return true;
+        }
+    }
+
+    false
 }
 
 #[derive(Default, Debug)]
@@ -252,11 +272,10 @@ fn gather_dir_entries<S: ::std::hash::BuildHasher>(
         }
 
         let matches_file = if include_mode || exclude_mode {
-            let ext = dot_lower_last_ext(&path);
             if include_mode {
-                include_exts.contains(&ext)
+                path_matches_extension_filters(&path, include_exts)
             } else {
-                !exclude_exts.contains(&ext)
+                !path_matches_extension_filters(&path, exclude_exts)
             }
         } else {
             true
@@ -366,19 +385,15 @@ pub fn is_event_path_relevant<S: ::std::hash::BuildHasher>(
     // Apply extension rules (primarily for files; directories usually have no ext).
     let include_mode = !include_exts.is_empty();
     let exclude_mode = !exclude_exts.is_empty();
-    let ext = dot_lower_last_ext(abs_path);
 
     if include_mode {
         // Only consider files that match an included extension.
-        if ext.is_empty() {
-            return false;
-        }
-        return include_exts.contains(&ext);
+        return path_matches_extension_filters(abs_path, include_exts);
     }
 
     if exclude_mode {
         // Ignore files that match an excluded extension.
-        if !ext.is_empty() && exclude_exts.contains(&ext) {
+        if path_matches_extension_filters(abs_path, exclude_exts) {
             return false;
         }
         return true;

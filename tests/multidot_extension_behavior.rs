@@ -3,12 +3,11 @@ use std::fs;
 use stitch::core::*;
 use tempfile::TempDir;
 
-/// This test documents current behavior:
-/// - `parse_extension_filters` will happily accept ".tar.gz"
-/// - `scan_dir_to_node` uses only the LAST extension (via `Path::extension`), so ".tar.gz" files
-///   are considered ".gz" for matching.
+/// This test verifies that multi-dot extensions now work correctly:
+/// - `parse_extension_filters` accepts ".tar.gz"
+/// - `scan_dir_to_node` now matches multi-dot extensions like ".tar.gz"
 #[test]
-fn include_multidot_extension_documents_last_segment_behavior() {
+fn include_multidot_extension_now_works() {
     let tmp = TempDir::new().unwrap();
     let root = tmp.path();
 
@@ -19,7 +18,6 @@ fn include_multidot_extension_documents_last_segment_behavior() {
     let (inc, _exc) = parse_extension_filters(".tar.gz");
     assert!(inc.contains(".tar.gz"));
 
-    // But the scanner compares only the last extension ("gz").
     let include: HashSet<String> = inc; // contains ".tar.gz"
     let exclude_exts: HashSet<String> = HashSet::new();
     let ex_dirs: HashSet<String> = HashSet::new();
@@ -27,11 +25,10 @@ fn include_multidot_extension_documents_last_segment_behavior() {
 
     let tree = scan_dir_to_node(root, &include, &exclude_exts, &ex_dirs, &ex_files);
 
-    // Under current behavior, "archive.tar.gz" will NOT be included because ".tar.gz" != ".gz".
+    // Now ".tar.gz" files should be included when filtering for ".tar.gz"
     let has_archive = tree.children.iter().any(|n| n.name == "archive.tar.gz");
     assert!(
-        !has_archive,
-        "Currently, include set is matched against the last extension only (\".gz\"). \
-Consider normalizing multi-dot semantics if you want a different behavior."
+        has_archive,
+        "Multi-dot extension '.tar.gz' should now match files with that extension"
     );
 }
