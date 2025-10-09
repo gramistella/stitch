@@ -1,4 +1,4 @@
-use syn::{self};
+// `syn` no longer used in this module
 
 // Helpers for scanning string literals in a byte buffer
 fn scan_string_literal(bytes: &[u8], len_bytes: usize, mut cursor: usize, quote: u8) -> usize {
@@ -88,69 +88,36 @@ pub fn apply_rust_filters(source: &str, opts: &RustFilterOptions) -> String {
         return source.to_string();
     }
 
-    // Fast path: if we only need to drop comments without altering code structure, we can use syn parsing
-    // and reconstruct text with spans. We'll do a line-based fallback if parsing fails.
-    match syn::parse_file(source) {
-        Ok(_ast) => {
-            if opts.function_signatures_only {
-                // Apply comment removal first (if requested), then collapse function bodies only.
-                let maybe_cleaned =
-                    if opts.remove_inline_regular_comments || opts.remove_doc_comments {
-                        Some(remove_comments_textual(
-                            source,
-                            opts.remove_inline_regular_comments,
-                            opts.remove_doc_comments,
-                        ))
-                    } else {
-                        None
-                    };
-                let base: std::borrow::Cow<str> = maybe_cleaned
-                    .map_or(std::borrow::Cow::Borrowed(source), |s| {
-                        std::borrow::Cow::Owned(s)
-                    });
-                let transformed = transform_functions_to_signatures(&base);
-                let collapsed = crate::core::collapse_consecutive_blank_lines(&transformed);
-                return trim_leading_blank_lines(&collapsed);
-            }
-            // For comment removal only
-            let cleaned = remove_comments_textual(
+    apply_rust_filters_inner(source, opts)
+}
+
+fn apply_rust_filters_inner(source: &str, opts: &RustFilterOptions) -> String {
+    if opts.function_signatures_only {
+        let maybe_cleaned = if opts.remove_inline_regular_comments || opts.remove_doc_comments {
+            Some(remove_comments_textual(
                 source,
                 opts.remove_inline_regular_comments,
                 opts.remove_doc_comments,
-            );
-            let collapsed = crate::core::collapse_consecutive_blank_lines(&cleaned);
-            trim_leading_blank_lines(&collapsed)
-        }
-        Err(_e) => {
-            // Fallback: textual pass
-            if opts.function_signatures_only {
-                let maybe_cleaned =
-                    if opts.remove_inline_regular_comments || opts.remove_doc_comments {
-                        Some(remove_comments_textual(
-                            source,
-                            opts.remove_inline_regular_comments,
-                            opts.remove_doc_comments,
-                        ))
-                    } else {
-                        None
-                    };
-                let base: std::borrow::Cow<str> = maybe_cleaned
-                    .map_or(std::borrow::Cow::Borrowed(source), |s| {
-                        std::borrow::Cow::Owned(s)
-                    });
-                let transformed = transform_functions_to_signatures(&base);
-                let collapsed = crate::core::collapse_consecutive_blank_lines(&transformed);
-                return trim_leading_blank_lines(&collapsed);
-            }
-            let cleaned = remove_comments_textual(
-                source,
-                opts.remove_inline_regular_comments,
-                opts.remove_doc_comments,
-            );
-            let collapsed = crate::core::collapse_consecutive_blank_lines(&cleaned);
-            trim_leading_blank_lines(&collapsed)
-        }
+            ))
+        } else {
+            None
+        };
+        let base: std::borrow::Cow<str> = maybe_cleaned
+            .map_or(std::borrow::Cow::Borrowed(source), |s| {
+                std::borrow::Cow::Owned(s)
+            });
+        let transformed = transform_functions_to_signatures(&base);
+        let collapsed = crate::core::collapse_consecutive_blank_lines(&transformed);
+        return trim_leading_blank_lines(&collapsed);
     }
+    // Comment removal only
+    let cleaned = remove_comments_textual(
+        source,
+        opts.remove_inline_regular_comments,
+        opts.remove_doc_comments,
+    );
+    let collapsed = crate::core::collapse_consecutive_blank_lines(&cleaned);
+    trim_leading_blank_lines(&collapsed)
 }
 
 #[derive(Copy, Clone)]
@@ -253,8 +220,21 @@ impl<'a> SignatureReducer<'a> {
             .push_str(&self.src[self.last_emit..bounds.sig_end]);
         self.output.push_str(";\n");
         let body_end = skip_function_body(self.bytes, self.len, bounds.body_start + 1);
-        self.last_emit = body_end;
-        self.index = body_end;
+        // Avoid creating an extra blank line: if the original source has trailing
+        // spaces/tabs and a newline immediately after the function body's closing
+        // brace, skip them because we already emitted a newline above.
+        let mut resume = body_end;
+        while resume < self.len && (self.bytes[resume] == b' ' || self.bytes[resume] == b'\t') {
+            resume += 1;
+        }
+        // Skip CRLF (\r\n) if present, otherwise skip a single LF.
+        if resume + 1 < self.len && self.bytes[resume] == b'\r' && self.bytes[resume + 1] == b'\n' {
+            resume += 2;
+        } else if resume < self.len && self.bytes[resume] == b'\n' {
+            resume += 1;
+        }
+        self.last_emit = resume;
+        self.index = resume;
     }
 
     fn flush_tail(&mut self) {
@@ -269,6 +249,14 @@ impl<'a> SignatureReducer<'a> {
             return false;
         }
         if self.bytes[self.index] != b'f' || self.bytes[self.index + 1] != b'n' {
+            return false;
+        }
+        // Do not treat raw identifiers like `r#fn` as the `fn` keyword.
+        // If the bytes immediately before "fn" are "r#", this is a raw identifier.
+        if self.index >= 2
+            && self.bytes[self.index - 1] == b'#'
+            && self.bytes[self.index - 2] == b'r'
+        {
             return false;
         }
         let prev_ok = self.index == 0 || !is_ident_byte(self.bytes[self.index - 1]);
