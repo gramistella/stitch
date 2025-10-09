@@ -158,3 +158,28 @@ Text { text: 'single \'quote\' with /* not comment */' }
     // Should preserve strings with escaped quotes and not treat comment markers inside as comments
     assert_eq!(got, src);
 }
+
+#[test]
+fn lifetimes_do_not_break_comment_stripping() {
+    let src = r#"
+/// Module docs above should be removed when doc stripping is enabled
+pub mod m {
+    /// Doc above impl should be removed
+    pub struct S;
+    impl S {
+        pub const STR: &'static str = "x";
+        /// Doc inside impl should be removed too
+        pub fn f<'a>(&'a self) -> &'a S { self }
+    }
+}
+"#;
+    let opts = RustFilterOptions {
+        remove_inline_regular_comments: true,
+        remove_doc_comments: true,
+        function_signatures_only: false,
+    };
+    let got = apply_rust_filters(src, &opts);
+    assert!(!got.contains("/// Module docs above should be removed"));
+    assert!(!got.contains("/// Doc above impl should be removed"));
+    assert!(!got.contains("/// Doc inside impl should be removed too"));
+}

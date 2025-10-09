@@ -579,6 +579,13 @@ impl<'a> CommentRemover<'a> {
             return;
         }
         if self.bytes[self.index] == b'\'' {
+            // Treat lifetimes like \'static, \'a, etc. as identifiers, not char literals.
+            if is_probable_lifetime(self.bytes, self.len, self.index) {
+                let end = skip_lifetime(self.bytes, self.len, self.index);
+                self.output.push_str(&self.src[self.index..end]);
+                self.index = end;
+                return;
+            }
             self.output.push('\'');
             self.index += 1;
             self.state = CommentState::Sq { escaped: false };
