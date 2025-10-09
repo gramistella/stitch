@@ -4,7 +4,7 @@ set shell := ["bash", "-euo", "pipefail", "-c"]
 set windows-shell := ["bash", "-euo", "pipefail", "-c"]
 
 test:
-	cargo test --workspace --all-targets --all-features
+	cargo nextest run --workspace --all-targets --all-features
 
 lint:
   cargo clippy --workspace --all-targets --all-features -- \
